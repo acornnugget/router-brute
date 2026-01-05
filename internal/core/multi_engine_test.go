@@ -95,9 +95,10 @@ func TestMultiTargetEngine_ConcurrentTargets(t *testing.T) {
 	// Find the results for each target
 	var result1, result2 *MultiTargetResult
 	for _, result := range results {
-		if result.Target.IP == "192.168.1.1" {
+		switch result.Target.IP {
+		case "192.168.1.1":
 			result1 = &result
-		} else if result.Target.IP == "192.168.1.2" {
+		case "192.168.1.2":
 			result2 = &result
 		}
 	}
@@ -114,11 +115,11 @@ func TestMultiTargetEngine_ConcurrentTargets(t *testing.T) {
 	assert.Equal(t, 2, result2.Attempts)
 
 	// Verify no errors
-	var errors []MultiTargetError
+	var targetErrors []MultiTargetError
 	for err := range engine.GetErrors() {
-		errors = append(errors, err)
+		targetErrors = append(targetErrors, err)
 	}
-	assert.Len(t, errors, 0)
+	assert.Len(t, targetErrors, 0)
 
 	mockFactory.AssertExpectations(t)
 	mockModule1.AssertExpectations(t)

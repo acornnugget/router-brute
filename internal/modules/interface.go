@@ -3,9 +3,10 @@ package modules
 import (
 	"context"
 	"errors"
+	"time"
+
 	"github.com/nimda/router-brute/internal/core"
 	"github.com/nimda/router-brute/internal/interfaces"
-	"time"
 )
 
 // BaseRouterModule provides common functionality for router modules

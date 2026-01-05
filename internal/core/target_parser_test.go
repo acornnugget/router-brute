@@ -117,11 +117,13 @@ invalid_port:192.168.1.3:abc
 
 	tmpFile, err := os.CreateTemp("", "test_targets_*.txt")
 	require.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
+	defer func(name string) {
+		_ = os.Remove(name)
+	}(tmpFile.Name())
 
 	_, err = tmpFile.WriteString(testContent)
 	require.NoError(t, err)
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	parser := NewTargetParser("default_cmd", 8728)
 	targets, err := parser.ParseTargetFile(tmpFile.Name())
@@ -164,8 +166,10 @@ func TestParseTargetFile_EmptyFile(t *testing.T) {
 	// Create empty temporary file
 	tmpFile, err := os.CreateTemp("", "empty_targets_*.txt")
 	require.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
-	tmpFile.Close()
+	defer func(name string) {
+		_ = os.Remove(name)
+	}(tmpFile.Name())
+	_ = tmpFile.Close()
 
 	parser := NewTargetParser("default_cmd", 8728)
 	targets, err := parser.ParseTargetFile(tmpFile.Name())
@@ -190,11 +194,13 @@ func TestParseTargetFile_OnlyComments(t *testing.T) {
 
 	tmpFile, err := os.CreateTemp("", "comments_only_*.txt")
 	require.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
+	defer func(name string) {
+		_ = os.Remove(name)
+	}(tmpFile.Name())
 
 	_, err = tmpFile.WriteString(testContent)
 	require.NoError(t, err)
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	parser := NewTargetParser("default_cmd", 8728)
 	targets, err := parser.ParseTargetFile(tmpFile.Name())

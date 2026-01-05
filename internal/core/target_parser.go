@@ -114,7 +114,12 @@ func (p *TargetParser) ParseTargetFile(filePath string) ([]*Target, error) {
 		zlog.Error().Str("file", filePath).Err(err).Msg("Failed to open target file")
 		return nil, err
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			zlog.Warn().Msg("Failed to close target file")
+		}
+	}(file)
 
 	var targets []*Target
 	scanner := bufio.NewScanner(file)
