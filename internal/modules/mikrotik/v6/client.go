@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nimda/router-brute/internal/modules/mikrotik/common"
+
 	"github.com/nimda/router-brute/internal/interfaces"
 	"github.com/nimda/router-brute/internal/modules"
 	"github.com/nimda/router-brute/pkg/utils"
@@ -18,19 +20,17 @@ import (
 // MikrotikV6Module implements the RouterOS v6 API protocol
 type MikrotikV6Module struct {
 	*modules.BaseRouterModule
-	conn       net.Conn
-	port       int
-	timeout    time.Duration
-	logingMode string
+	conn    net.Conn
+	port    int
+	timeout time.Duration
 }
 
 // NewMikrotikV6Module creates a new Mikrotik RouterOS v6 module
-func NewMikrotikV6Module(logingMode string) *MikrotikV6Module {
+func NewMikrotikV6Module() *MikrotikV6Module {
 	return &MikrotikV6Module{
 		BaseRouterModule: modules.NewBaseRouterModule(),
 		port:             8728, // Default RouterOS API port
 		timeout:          10 * time.Second,
-		logingMode:       logingMode,
 	}
 }
 
@@ -86,7 +86,9 @@ func (m *MikrotikV6Module) Connect(ctx context.Context) error {
 
 	// Set read/write deadlines
 	if err := m.conn.SetDeadline(time.Now().Add(m.timeout)); err != nil {
-		m.conn.Close()
+		if err := m.conn.Close(); err != nil {
+			zlog.Trace().Err(err).Msg("Error closing v6 connection after deadline failure")
+		}
 		m.SetConnected(false)
 		return err
 	}
@@ -101,7 +103,9 @@ func (m *MikrotikV6Module) Close() error {
 	}
 
 	if m.conn != nil {
-		m.conn.Close()
+		if err := m.conn.Close(); err != nil {
+			zlog.Trace().Err(err).Msg("Error closing v6 connection")
+		}
 	}
 	m.SetConnected(false)
 	m.conn = nil
@@ -110,14 +114,16 @@ func (m *MikrotikV6Module) Close() error {
 
 // Authenticate attempts to authenticate with the given password
 func (m *MikrotikV6Module) Authenticate(ctx context.Context, password string) (bool, error) {
-	// Debug: Check context
+	// Validate context
 	if ctx == nil {
-		zlog.Error().Msg("ERROR: nil context received in Authenticate()")
+		return false, fmt.Errorf("nil context received in Authenticate()")
 	}
 
 	// Always disconnect and reconnect for each attempt to avoid session issues
 	if m.IsConnected() {
-		m.Close()
+		if err := m.Close(); err != nil {
+			zlog.Trace().Err(err).Msg("Error closing v6 connection during reauthentication")
+		}
 	}
 
 	if err := m.Connect(ctx); err != nil {
@@ -143,7 +149,7 @@ func (m *MikrotikV6Module) sendLogin(user string, password string) error {
 	if m.conn == nil {
 		return errors.New("not connected")
 	}
-	command := buildLoginCommand("admin", password)
+	command := buildLoginCommand(user, password)
 	zlog.Debug().Str("password", password).Msg("Trying:")
 
 	zlog.Trace().Bytes("command", command).Str("password", password).Msg("Sending password")
@@ -174,19 +180,10 @@ func (m *MikrotikV6Module) sendLogin(user string, password string) error {
 
 func buildLoginCommand(username, password string) []byte {
 	var buf []byte
-	buf = appendLengthPrefixed(buf, "/login")
-	buf = appendLengthPrefixed(buf, "=name="+username)
-	buf = appendLengthPrefixed(buf, "=password="+password)
+	buf = common.AppendLengthPrefixed(buf, "/login")
+	buf = common.AppendLengthPrefixed(buf, "=name="+username)
+	buf = common.AppendLengthPrefixed(buf, "=password="+password)
 	buf = append(buf, 0x00)
-	return buf
-}
-func appendLengthPrefixed(buf []byte, word string) []byte {
-	wordBytes := []byte(word)
-	if len(wordBytes) > 255 {
-		wordBytes = wordBytes[:255]
-	}
-	buf = append(buf, byte(len(wordBytes)))
-	buf = append(buf, wordBytes...)
 	return buf
 }
 

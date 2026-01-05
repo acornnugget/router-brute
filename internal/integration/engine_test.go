@@ -14,7 +14,9 @@ func TestEngineWithMockModule(t *testing.T) {
 
 	// Create mock module
 	mockModule := mock.NewMockModule()
-	mockModule.Initialize("192.168.1.1", "admin", nil)
+	if err := mockModule.Initialize("192.168.1.1", "admin", nil); err != nil {
+		t.Fatalf("Failed to initialize mock module: %v", err)
+	}
 	mockModule.SetSuccessPassword("secret123")
 
 	// Set the module
@@ -72,7 +74,9 @@ func TestEngineContextCancellation(t *testing.T) {
 
 	// Create mock module
 	mockModule := mock.NewMockModule()
-	mockModule.Initialize("192.168.1.1", "admin", nil)
+	if err := mockModule.Initialize("192.168.1.1", "admin", nil); err != nil {
+		t.Fatalf("Failed to initialize mock module: %v", err)
+	}
 	mockModule.SetSuccessPassword("never-found") // Set password that won't be found
 
 	engine.SetModule(mockModule)
