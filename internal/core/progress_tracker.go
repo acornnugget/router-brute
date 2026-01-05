@@ -18,7 +18,6 @@ type ProgressTracker struct {
 	stopChan        chan struct{}
 	wg              sync.WaitGroup
 	lastSaveTime    time.Time
-	saveOnChange    bool
 	changesDetected bool
 }
 
@@ -58,7 +57,9 @@ func (pt *ProgressTracker) Stop() {
 	pt.wg.Wait()
 
 	// Final save
-	pt.SaveNow()
+	if err := pt.SaveNow(); err != nil {
+		zlog.Error().Err(err).Msg("Failed to save final progress state")
+	}
 }
 
 // autoSaveLoop periodically saves the resume state
@@ -76,7 +77,9 @@ func (pt *ProgressTracker) autoSaveLoop(ctx context.Context) {
 			pt.mu.RUnlock()
 
 			if shouldSave {
-				pt.SaveNow()
+				if err := pt.SaveNow(); err != nil {
+					zlog.Error().Err(err).Msg("Failed to save progress during auto-save")
+				}
 			}
 
 		case <-pt.stopChan:
