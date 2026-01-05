@@ -18,19 +18,17 @@ import (
 // MikrotikV6Module implements the RouterOS v6 API protocol
 type MikrotikV6Module struct {
 	*modules.BaseRouterModule
-	conn       net.Conn
-	port       int
-	timeout    time.Duration
-	logingMode string
+	conn    net.Conn
+	port    int
+	timeout time.Duration
 }
 
 // NewMikrotikV6Module creates a new Mikrotik RouterOS v6 module
-func NewMikrotikV6Module(logingMode string) *MikrotikV6Module {
+func NewMikrotikV6Module() *MikrotikV6Module {
 	return &MikrotikV6Module{
 		BaseRouterModule: modules.NewBaseRouterModule(),
 		port:             8728, // Default RouterOS API port
 		timeout:          10 * time.Second,
-		logingMode:       logingMode,
 	}
 }
 

