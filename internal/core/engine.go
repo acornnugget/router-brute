@@ -24,6 +24,21 @@ type Engine struct {
 	module        interfaces.RouterModule
 }
 
+// GetResults returns the channel for receiving authentication results
+func (e *Engine) GetResults() chan Result {
+	return e.results
+}
+
+// GetErrors returns the channel for receiving errors
+func (e *Engine) GetErrors() chan error {
+	return e.errors
+}
+
+// WaitForCompletion blocks until all workers have completed
+func (e *Engine) WaitForCompletion() {
+	e.wg.Wait()
+}
+
 // Result represents the outcome of a single authentication attempt
 type Result struct {
 	Username     string
@@ -60,7 +75,7 @@ func (e *Engine) LoadPasswords(passwords []string) {
 	e.passwordQueue = NewPasswordQueue(passwords)
 }
 
-// Start begins the brute-forcing process
+// Start begins the brute-forcing process (backward compatible)
 func (e *Engine) Start() error {
 	if e.passwordQueue == nil || e.passwordQueue.Total() == 0 {
 		return errors.New("no passwords loaded")
@@ -68,6 +83,12 @@ func (e *Engine) Start() error {
 
 	if e.module == nil {
 		return errors.New("no router module set")
+	}
+
+	if e.ctx == nil {
+		var cancel context.CancelFunc
+		e.ctx, cancel = context.WithCancel(context.Background())
+		defer cancel()
 	}
 
 	e.startTime = time.Now()
@@ -79,6 +100,28 @@ func (e *Engine) Start() error {
 	}
 
 	return nil
+}
+
+// StartWithContext begins the brute-forcing process with explicit context
+func (e *Engine) StartWithContext(ctx context.Context) {
+	if e.passwordQueue == nil || e.passwordQueue.Total() == 0 {
+		zlog.Error().Msg("No passwords loaded")
+		return
+	}
+
+	if e.module == nil {
+		zlog.Error().Msg("No router module set")
+		return
+	}
+
+	e.ctx = ctx
+	e.startTime = time.Now()
+
+	// Start worker pool
+	for i := 0; i < e.workers; i++ {
+		e.wg.Add(1)
+		go e.worker(i)
+	}
 }
 
 // worker handles individual authentication attempts
@@ -104,8 +147,8 @@ func (e *Engine) worker(id int) {
 			// Get next password to try
 			password := e.passwordQueue.Next()
 			if password == "" {
-				// No more passwords
-				continue
+				// No more passwords, exit worker
+				return
 			}
 
 			// Rate limiting
@@ -162,6 +205,18 @@ func (e *Engine) Stop() {
 		}
 	}
 
+	close(e.results)
+	close(e.errors)
+}
+
+// Close cleans up the engine resources
+func (e *Engine) Close() {
+	e.wg.Wait()
+	if e.module != nil {
+		if err := e.module.Close(); err != nil {
+			zlog.Trace().Err(err).Msg("Error closing module connection")
+		}
+	}
 	close(e.results)
 	close(e.errors)
 }
