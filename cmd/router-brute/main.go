@@ -90,12 +90,23 @@ func setupProtocolCommand(cmd *cobra.Command, defaultPort int) {
 	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		target, _ := cmd.Flags().GetString("target")
 		targetFile, _ := cmd.Flags().GetString("target-file")
+		resumeFile, _ := cmd.Flags().GetString("resume")
+		wordlist, _ := cmd.Flags().GetString("wordlist")
 
+		// If resuming, target and wordlist are optional (loaded from resume file)
+		if resumeFile != "" {
+			return nil
+		}
+
+		// Normal mode validation
 		if target == "" && targetFile == "" {
 			return fmt.Errorf("either --target or --target-file must be specified")
 		}
 		if target != "" && targetFile != "" {
 			return fmt.Errorf("cannot specify both --target and --target-file")
+		}
+		if wordlist == "" {
+			return fmt.Errorf("--wordlist is required")
 		}
 		return nil
 	}
@@ -114,6 +125,11 @@ type AttackConfig struct {
 	concurrentTargets int
 	moduleFactory     func() interfaces.RouterModule
 	multiFactory      interfaces.ModuleFactory
+
+	// Resume functionality
+	resumeFile       string
+	saveProgressInterval time.Duration
+	saveDir          string
 }
 
 // addCommonFlags adds common flags to a command
@@ -127,6 +143,11 @@ func addCommonFlags(cmd *cobra.Command, defaultPort int) {
 	cmd.Flags().String("timeout", "10s", "Connection timeout")
 	cmd.Flags().String("target-file", "", "File containing target specifications (multi-target mode)")
 	cmd.Flags().Int("concurrent-targets", 1, "Number of targets to attack simultaneously")
+
+	// Resume functionality
+	cmd.Flags().String("resume", "", "Resume from a previous session (path to resume file)")
+	cmd.Flags().String("save-progress", "30s", "Auto-save progress interval (0 to disable)")
+	cmd.Flags().String("save-dir", "./resume", "Directory to save resume files")
 }
 
 // parseAttackConfig parses attack configuration from command flags
@@ -140,6 +161,9 @@ func parseAttackConfig(cmd *cobra.Command) *AttackConfig {
 	rateLimit, _ := cmd.Flags().GetString("rate")
 	targetFile, _ := cmd.Flags().GetString("target-file")
 	concurrentTargets, _ := cmd.Flags().GetInt("concurrent-targets")
+	resumeFile, _ := cmd.Flags().GetString("resume")
+	saveProgress, _ := cmd.Flags().GetString("save-progress")
+	saveDir, _ := cmd.Flags().GetString("save-dir")
 
 	rateDuration, err := time.ParseDuration(rateLimit)
 	if err != nil {
@@ -149,6 +173,14 @@ func parseAttackConfig(cmd *cobra.Command) *AttackConfig {
 	timeoutDuration, err := time.ParseDuration(timeout)
 	if err != nil {
 		zlog.Fatal().Err(err).Msg("Invalid timeout")
+	}
+
+	var saveProgressInterval time.Duration
+	if saveProgress != "" && saveProgress != "0" && saveProgress != "0s" {
+		saveProgressInterval, err = time.ParseDuration(saveProgress)
+		if err != nil {
+			zlog.Fatal().Err(err).Msg("Invalid save-progress interval")
+		}
 	}
 
 	return &AttackConfig{
@@ -161,6 +193,9 @@ func parseAttackConfig(cmd *cobra.Command) *AttackConfig {
 		rateLimit:         rateDuration,
 		targetFile:        targetFile,
 		concurrentTargets: concurrentTargets,
+		resumeFile:        resumeFile,
+		saveProgressInterval: saveProgressInterval,
+		saveDir:           saveDir,
 	}
 }
 
@@ -282,23 +317,103 @@ func runAttack(cfg *AttackConfig) {
 
 // runMultiTarget executes a multi-target attack
 func runMultiTarget(cfg *AttackConfig) {
-	zlog.Info().Str("file", cfg.targetFile).Msg("Loading targets for multi-target attack")
+	var resumeState *core.ResumeState
+	var passwords []string
+	var targets []*core.Target
+	var err error
 
-	// Load targets
-	parser := core.NewTargetParser("", cfg.port) // Empty default command
-	targets, err := parser.ParseTargetFile(cfg.targetFile)
-	if err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to load targets")
+	// Check if resuming from a previous session
+	if cfg.resumeFile != "" {
+		zlog.Info().Str("file", cfg.resumeFile).Msg("Resuming from previous session")
+		resumeState, err = core.LoadResumeState(cfg.resumeFile)
+		if err != nil {
+			zlog.Fatal().Err(err).Msg("Failed to load resume file")
+		}
+
+		// Print resume summary
+		resumeState.PrintSummary()
+
+		// Load passwords from the file specified in resume state
+		passwords, err = loadPasswords(resumeState.PasswordFile)
+		if err != nil {
+			zlog.Fatal().Err(err).Msg("Failed to load wordlist from resume state")
+		}
+
+		// Convert resume state targets to core.Target
+		targets = make([]*core.Target, len(resumeState.Targets))
+		for i, tp := range resumeState.Targets {
+			targets[i] = &core.Target{
+				IP:       tp.IP,
+				Port:     tp.Port,
+				Username: tp.Username,
+			}
+		}
+
+		// Override configuration from resume state
+		cfg.user = resumeState.Username
+		cfg.workers = resumeState.Workers
+		rateDuration, err := time.ParseDuration(resumeState.RateLimit)
+		if err == nil {
+			cfg.rateLimit = rateDuration
+		}
+
+		zlog.Info().
+			Int("total_targets", len(targets)).
+			Int("total_passwords", len(passwords)).
+			Msg("Resumed session configuration")
+	} else {
+		// Normal mode - load from files
+		zlog.Info().Str("file", cfg.targetFile).Msg("Loading targets for multi-target attack")
+
+		// Load targets
+		parser := core.NewTargetParser("", cfg.port) // Empty default command
+		targets, err = parser.ParseTargetFile(cfg.targetFile)
+		if err != nil {
+			zlog.Fatal().Err(err).Msg("Failed to load targets")
+		}
+
+		if len(targets) == 0 {
+			zlog.Fatal().Msg("No valid targets found in file")
+		}
+
+		// Load passwords
+		passwords, err = loadPasswords(cfg.wordlist)
+		if err != nil {
+			zlog.Fatal().Err(err).Msg("Failed to load wordlist")
+		}
+
+		// Create new resume state
+		resumeState = &core.ResumeState{
+			Protocol:     cfg.multiFactory.GetProtocolName(),
+			Username:     cfg.user,
+			PasswordFile: cfg.wordlist,
+			TargetFile:   cfg.targetFile,
+			Workers:      cfg.workers,
+			RateLimit:    cfg.rateLimit.String(),
+			Targets:      make([]core.TargetProgress, len(targets)),
+		}
+
+		// Initialize target progress
+		for i, target := range targets {
+			resumeState.Targets[i] = core.TargetProgress{
+				IP:             target.IP,
+				Port:           target.Port,
+				Username:       target.Username,
+				PasswordsTried: 0,
+				Completed:      false,
+				Success:        false,
+			}
+		}
 	}
 
-	if len(targets) == 0 {
-		zlog.Fatal().Msg("No valid targets found in file")
-	}
-
-	// Load passwords
-	passwords, err := loadPasswords(cfg.wordlist)
-	if err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to load wordlist")
+	// Create progress tracker
+	var tracker *core.ProgressTracker
+	if cfg.saveProgressInterval > 0 {
+		tracker = core.NewProgressTracker(resumeState, cfg.saveDir, cfg.saveProgressInterval, true)
+		zlog.Info().
+			Dur("interval", cfg.saveProgressInterval).
+			Str("directory", cfg.saveDir).
+			Msg("Progress auto-save enabled")
 	}
 
 	// Create multi-target engine
@@ -307,9 +422,20 @@ func runMultiTarget(cfg *AttackConfig) {
 	engine.LoadTargets(targets)
 	engine.LoadPasswords(passwords)
 
+	// Set progress tracker if enabled
+	if tracker != nil {
+		engine.SetProgressTracker(tracker)
+	}
+
 	// Start attack
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Start progress tracker
+	if tracker != nil {
+		tracker.Start(ctx)
+		defer tracker.Stop()
+	}
 
 	engine.Start(ctx)
 

@@ -35,10 +35,11 @@ type MultiTargetEngine struct {
 	workersPerTarget  int
 	rateLimit         time.Duration
 
-	resultsChan chan MultiTargetResult
-	errorsChan  chan MultiTargetError
-	wg          sync.WaitGroup
-	ctx         context.Context
+	resultsChan     chan MultiTargetResult
+	errorsChan      chan MultiTargetError
+	wg              sync.WaitGroup
+	ctx             context.Context
+	progressTracker *ProgressTracker // Optional progress tracking for resume functionality
 }
 
 // NewMultiTargetEngine creates a new multi-target engine
@@ -66,6 +67,11 @@ func (mte *MultiTargetEngine) LoadTargets(targets []*Target) {
 // LoadPasswords loads the passwords to try
 func (mte *MultiTargetEngine) LoadPasswords(passwords []string) {
 	mte.passwords = passwords
+}
+
+// SetProgressTracker sets the progress tracker for resume functionality
+func (mte *MultiTargetEngine) SetProgressTracker(tracker *ProgressTracker) {
+	mte.progressTracker = tracker
 }
 
 // Start begins the multi-target attack
@@ -151,13 +157,51 @@ func (mte *MultiTargetEngine) processTarget(target *Target, semaphore chan struc
 		zlog.Debug().Str("target", target.IP).Err(err).Msg("Error closing test connection")
 	}
 
+	// Check for existing progress (resume functionality)
+	var startPasswordIndex int
+	if mte.progressTracker != nil {
+		progress := mte.progressTracker.GetTargetProgress(target.IP, target.Port)
+		if progress != nil {
+			if progress.Completed {
+				zlog.Info().
+					Str("target", target.IP).
+					Int("port", target.Port).
+					Bool("success", progress.Success).
+					Msg("Target already completed, skipping")
+				return
+			}
+			startPasswordIndex = progress.PasswordsTried
+			if startPasswordIndex > 0 {
+				zlog.Info().
+					Str("target", target.IP).
+					Int("port", target.Port).
+					Int("resume_from", startPasswordIndex).
+					Msg("Resuming from previous progress")
+			}
+		}
+	}
+
 	// Create engine for this target
 	engine := NewEngine(mte.workersPerTarget, mte.rateLimit)
 	engine.SetModule(module)
 
-	// Create a copy of passwords for this target to ensure isolation
-	passwordsCopy := make([]string, len(mte.passwords))
-	copy(passwordsCopy, mte.passwords)
+	// Create a copy of passwords for this target, skipping already-tried ones
+	var passwordsCopy []string
+	if startPasswordIndex > 0 && startPasswordIndex < len(mte.passwords) {
+		// Resume from where we left off
+		passwordsCopy = make([]string, len(mte.passwords)-startPasswordIndex)
+		copy(passwordsCopy, mte.passwords[startPasswordIndex:])
+		zlog.Debug().
+			Str("target", target.IP).
+			Int("total_passwords", len(mte.passwords)).
+			Int("skipped", startPasswordIndex).
+			Int("remaining", len(passwordsCopy)).
+			Msg("Password list adjusted for resume")
+	} else {
+		// Start from beginning
+		passwordsCopy = make([]string, len(mte.passwords))
+		copy(passwordsCopy, mte.passwords)
+	}
 	engine.LoadPasswords(passwordsCopy)
 
 	// Run the attack
@@ -184,6 +228,19 @@ func (mte *MultiTargetEngine) processTarget(target *Target, semaphore chan struc
 					Str("password", result.Password).
 					Dur("time", result.TimeConsumed).
 					Msg("✓ Found valid credentials")
+			}
+
+			// Update progress tracker periodically (every 10 attempts)
+			if mte.progressTracker != nil && len(results)%10 == 0 {
+				totalAttempts := startPasswordIndex + len(results)
+				mte.progressTracker.UpdateTargetProgress(
+					target.IP,
+					target.Port,
+					totalAttempts,
+					false, // not completed yet
+					false, // not successful yet
+					"",
+				)
 			}
 		}
 		zlog.Debug().Str("target", target.IP).Int("results", len(results)).Msg("Results collected")
@@ -217,6 +274,19 @@ func (mte *MultiTargetEngine) processTarget(target *Target, semaphore chan struc
 
 	endTime := time.Now()
 	duration := endTime.Sub(startTime)
+
+	// Update progress tracker with final status
+	if mte.progressTracker != nil {
+		totalAttempts := startPasswordIndex + len(results)
+		mte.progressTracker.UpdateTargetProgress(
+			target.IP,
+			target.Port,
+			totalAttempts,
+			true, // completed
+			success,
+			successPassword,
+		)
+	}
 
 	mte.resultsChan <- MultiTargetResult{
 		Target:          target,
