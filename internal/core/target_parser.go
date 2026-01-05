@@ -2,6 +2,7 @@ package core
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -33,6 +34,12 @@ func NewTargetParser(defaultCommand string, defaultPort int) *TargetParser {
 
 // ParseTargetLine parses a single line from target file
 // Format: username:ip:port:command (all fields except IP are optional)
+// Examples:
+//
+//	"192.168.1.1" - IP only, uses defaults for username, port, command
+//	"admin:192.168.1.1" - username and IP
+//	"admin:192.168.1.1:8728" - username, IP, and port
+//	"admin:192.168.1.1:8728:/login" - username, IP, port, and command
 func (p *TargetParser) ParseTargetLine(line string) (*Target, error) {
 	zlog.Trace().Str("line", line).Msg("Parsing target line")
 
@@ -49,45 +56,49 @@ func (p *TargetParser) ParseTargetLine(line string) (*Target, error) {
 		return nil, nil
 	}
 
-	// Parse fields in correct order: username:ip:port:command
-	// Handle edge case where first field might be empty
-	if len(parts) > 0 && parts[0] == "" {
-		// Skip empty first field (malformed line)
-		parts = parts[1:]
-	}
-
-	if len(parts) == 0 {
-		zlog.Warn().Str("line", line).Msg("Empty line after processing")
-		return nil, nil
-	}
-
+	// Use explicit field handling based on number of parts
 	target := &Target{
 		Username: "admin", // default
-		IP:       parts[0], // First field is IP when no username specified
 		Port:     p.defaultPort,
 		Command:  p.defaultCommand,
 	}
 
-	// Parse optional fields - format is username:ip:port:command
-	if len(parts) > 1 && parts[1] != "" {
-		// If we have at least 2 parts, parts[0] is username, parts[1] is IP
+	switch len(parts) {
+	case 1:
+		// Only IP specified
+		target.IP = parts[0]
+	case 2:
+		// Username and IP
 		target.Username = parts[0]
 		target.IP = parts[1]
-		if len(parts) > 2 && parts[2] != "" {
-			port, err := strconv.Atoi(parts[2])
-			if err != nil {
-				zlog.Warn().Str("port", parts[2]).Err(err).Msg("Invalid port, using default")
-				target.Port = p.defaultPort
-			} else {
-				target.Port = port
-			}
+	case 3:
+		// Username, IP, and Port
+		target.Username = parts[0]
+		target.IP = parts[1]
+		if port, err := strconv.Atoi(parts[2]); err == nil {
+			target.Port = port
+		} else {
+			zlog.Warn().Str("port", parts[2]).Err(err).Msg("Invalid port, using default")
 		}
-		if len(parts) > 3 && parts[3] != "" {
-			target.Command = parts[3]
+	case 4:
+		// Username, IP, Port, and Command
+		target.Username = parts[0]
+		target.IP = parts[1]
+		if port, err := strconv.Atoi(parts[2]); err == nil {
+			target.Port = port
+		} else {
+			zlog.Warn().Str("port", parts[2]).Err(err).Msg("Invalid port, using default")
 		}
-	} else {
-		// Only IP specified, use defaults for other fields
-		target.IP = parts[0]
+		target.Command = parts[3]
+	default:
+		zlog.Warn().Str("line", line).Int("parts", len(parts)).Msg("Invalid target format: too many fields")
+		return nil, fmt.Errorf("invalid target format: %s", line)
+	}
+
+	// Validate IP is not empty
+	if target.IP == "" {
+		zlog.Warn().Str("line", line).Msg("Target IP cannot be empty")
+		return nil, fmt.Errorf("target IP cannot be empty: %s", line)
 	}
 
 	zlog.Debug().Interface("target", target).Msg("Parsed target")

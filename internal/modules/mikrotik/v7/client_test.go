@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/nimda/router-brute/internal/modules/mikrotik/common"
 )
 
 func TestMikrotikV7ModuleCreation(t *testing.T) {
@@ -56,9 +58,9 @@ func TestMikrotikV7ProtocolEncoding(t *testing.T) {
 	// Note: The v7 module doesn't expose encodeSentence directly, but we can test
 	// the helper functions that are used internally
 	var buf []byte
-	buf = appendLengthPrefixed(buf, "/login")
-	buf = appendLengthPrefixed(buf, "=name=admin")
-	buf = appendLengthPrefixed(buf, "=password=test123")
+	buf = common.AppendLengthPrefixed(buf, "/login")
+	buf = common.AppendLengthPrefixed(buf, "=name=admin")
+	buf = common.AppendLengthPrefixed(buf, "=password=test123")
 	buf = append(buf, 0x00)
 
 	if len(buf) == 0 {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/nimda/router-brute/internal/interfaces"
 	"github.com/nimda/router-brute/internal/modules"
+	"github.com/nimda/router-brute/internal/modules/mikrotik/common"
 	"github.com/nimda/router-brute/internal/modules/mikrotik/v7/webfig"
 	"github.com/nimda/router-brute/pkg/utils"
 	zlog "github.com/rs/zerolog/log"
@@ -159,9 +160,9 @@ func (m *MikrotikV7Module) Close() error {
 
 // Authenticate attempts to authenticate with the given password using RouterOS v7 protocol
 func (m *MikrotikV7Module) Authenticate(ctx context.Context, password string) (bool, error) {
-	// Debug: Check context
+	// Validate context
 	if ctx == nil {
-		zlog.Error().Msg("nil context received in Authenticate()")
+		return false, fmt.Errorf("nil context received in Authenticate()")
 	}
 
 	zlog.Trace().Str("username", m.GetUsername()).Str("target", m.GetTarget()).Msg("Starting RouterOS v7 authentication attempt")
@@ -306,9 +307,9 @@ func buildLoginCommandV7(username, password string) []byte {
 	var buf []byte
 
 	// RouterOS v7 login command format
-	buf = appendLengthPrefixed(buf, "/login")
-	buf = appendLengthPrefixed(buf, "=name="+username)
-	buf = appendLengthPrefixed(buf, "=password="+password)
+	buf = common.AppendLengthPrefixed(buf, "/login")
+	buf = common.AppendLengthPrefixed(buf, "=name="+username)
+	buf = common.AppendLengthPrefixed(buf, "=password="+password)
 
 	// Add the null terminator
 	buf = append(buf, 0x00)
@@ -436,17 +437,6 @@ func (m *MikrotikV7Module) decodeWordsV6Fallback(data []byte) ([]string, error) 
 	}
 
 	return words, nil
-}
-
-// appendLengthPrefixed adds a length-prefixed word to the buffer
-func appendLengthPrefixed(buf []byte, word string) []byte {
-	wordBytes := []byte(word)
-	if len(wordBytes) > 255 {
-		wordBytes = wordBytes[:255]
-	}
-	buf = append(buf, byte(len(wordBytes)))
-	buf = append(buf, wordBytes...)
-	return buf
 }
 
 // Ensure MikrotikV7Module implements the RouterModule interface

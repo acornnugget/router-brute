@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nimda/router-brute/internal/interfaces"
+
 	"github.com/nimda/router-brute/internal/core"
 	"github.com/nimda/router-brute/internal/modules/mikrotik/v6"
 	"github.com/nimda/router-brute/internal/modules/mikrotik/v7"
@@ -61,95 +63,71 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable debug logging")
 	rootCmd.PersistentFlags().BoolVar(&traceMode, "trace", false, "Enable trace logging")
 
-	// mikrotik-v6 flags
-	mikrotikV6Cmd.Flags().String("target", "", "Router IP address or hostname")
-	mikrotikV6Cmd.Flags().String("user", "admin", "Username to test")
-	mikrotikV6Cmd.Flags().String("wordlist", "", "Path to password wordlist file")
-	mikrotikV6Cmd.Flags().Int("workers", 5, "Number of concurrent workers")
-	mikrotikV6Cmd.Flags().String("rate", "100ms", "Rate limit between attempts")
-	mikrotikV6Cmd.Flags().Int("port", 8728, "Router API port")
-	mikrotikV6Cmd.Flags().String("timeout", "10s", "Connection timeout")
-	mikrotikV6Cmd.Flags().String("target-file", "", "File containing target specifications (multi-target mode)")
-	mikrotikV6Cmd.Flags().Int("concurrent-targets", 1, "Number of targets to attack simultaneously")
+	// Setup all protocol commands
+	setupProtocolCommand(mikrotikV6Cmd, 8728)
+	setupProtocolCommand(mikrotikV7Cmd, 8729)
+	setupProtocolCommand(mikrotikV7RestCmd, 80)
 
-	if err := mikrotikV6Cmd.MarkFlagRequired("target"); err != nil {
-		log.Fatalf("Failed to mark target flag as required: %v", err)
-	}
-	if err := mikrotikV6Cmd.MarkFlagRequired("wordlist"); err != nil {
-		log.Fatalf("Failed to mark wordlist flag as required: %v", err)
-	}
-
-	// mikrotik-v7 flags
-	mikrotikV7Cmd.Flags().String("target", "", "Router IP address or hostname")
-	mikrotikV7Cmd.Flags().String("user", "admin", "Username to test")
-	mikrotikV7Cmd.Flags().String("wordlist", "", "Path to password wordlist file")
-	mikrotikV7Cmd.Flags().Int("workers", 5, "Number of concurrent workers")
-	mikrotikV7Cmd.Flags().String("rate", "100ms", "Rate limit between attempts")
-	mikrotikV7Cmd.Flags().Int("port", 8729, "Router API port (default: 8729)")
-	mikrotikV7Cmd.Flags().String("timeout", "10s", "Connection timeout")
-	mikrotikV7Cmd.Flags().String("target-file", "", "File containing target specifications (multi-target mode)")
-	mikrotikV7Cmd.Flags().Int("concurrent-targets", 1, "Number of targets to attack simultaneously")
-
-	if err := mikrotikV7Cmd.MarkFlagRequired("target"); err != nil {
-		log.Fatalf("Failed to mark target flag as required: %v", err)
-	}
-	if err := mikrotikV7Cmd.MarkFlagRequired("wordlist"); err != nil {
-		log.Fatalf("Failed to mark wordlist flag as required: %v", err)
-	}
-
-	// mikrotik-v7-rest flags
-	mikrotikV7RestCmd.Flags().String("target", "", "Router IP address or hostname")
-	mikrotikV7RestCmd.Flags().String("user", "admin", "Username to test")
-	mikrotikV7RestCmd.Flags().String("wordlist", "", "Path to password wordlist file")
-	mikrotikV7RestCmd.Flags().Int("workers", 5, "Number of concurrent workers")
-	mikrotikV7RestCmd.Flags().String("rate", "100ms", "Rate limit between attempts")
-	mikrotikV7RestCmd.Flags().Int("port", 80, "HTTP port (default: 80)")
+	// Additional REST-specific flag
 	mikrotikV7RestCmd.Flags().Bool("https", false, "Use HTTPS instead of HTTP")
-	mikrotikV7RestCmd.Flags().String("timeout", "10s", "Connection timeout")
-	mikrotikV7RestCmd.Flags().String("target-file", "", "File containing target specifications (multi-target mode)")
-	mikrotikV7RestCmd.Flags().Int("concurrent-targets", 1, "Number of targets to attack simultaneously")
 
-	if err := mikrotikV7RestCmd.MarkFlagRequired("target"); err != nil {
-		log.Fatalf("Failed to mark target flag as required: %v", err)
-	}
-	if err := mikrotikV7RestCmd.MarkFlagRequired("wordlist"); err != nil {
-		log.Fatalf("Failed to mark wordlist flag as required: %v", err)
-	}
-
+	// Add commands to root
 	rootCmd.AddCommand(mikrotikV6Cmd)
 	rootCmd.AddCommand(mikrotikV7Cmd)
 	rootCmd.AddCommand(mikrotikV7RestCmd)
 }
 
-func main() {
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+// setupProtocolCommand adds common flags and marks required flags for a protocol command
+func setupProtocolCommand(cmd *cobra.Command, defaultPort int) {
+	addCommonFlags(cmd, defaultPort)
+
+	if err := cmd.MarkFlagRequired("target"); err != nil {
+		log.Fatalf("Failed to mark target flag as required: %v", err)
+	}
+	if err := cmd.MarkFlagRequired("wordlist"); err != nil {
+		log.Fatalf("Failed to mark wordlist flag as required: %v", err)
 	}
 }
 
-func runMikrotikV6(cmd *cobra.Command, args []string) {
+// AttackConfig holds configuration for an attack
+type AttackConfig struct {
+	target            string
+	user              string
+	wordlist          string
+	workers           int
+	port              int
+	timeout           time.Duration
+	rateLimit         time.Duration
+	targetFile        string
+	concurrentTargets int
+	moduleFactory     func() interfaces.RouterModule
+	multiFactory      interfaces.ModuleFactory
+}
+
+// addCommonFlags adds common flags to a command
+func addCommonFlags(cmd *cobra.Command, defaultPort int) {
+	cmd.Flags().String("target", "", "Router IP address or hostname")
+	cmd.Flags().String("user", "admin", "Username to test")
+	cmd.Flags().String("wordlist", "", "Path to password wordlist file")
+	cmd.Flags().Int("workers", 5, "Number of concurrent workers")
+	cmd.Flags().String("rate", "100ms", "Rate limit between attempts")
+	cmd.Flags().Int("port", defaultPort, "Router API port")
+	cmd.Flags().String("timeout", "10s", "Connection timeout")
+	cmd.Flags().String("target-file", "", "File containing target specifications (multi-target mode)")
+	cmd.Flags().Int("concurrent-targets", 1, "Number of targets to attack simultaneously")
+}
+
+// parseAttackConfig parses attack configuration from command flags
+func parseAttackConfig(cmd *cobra.Command) *AttackConfig {
 	target, _ := cmd.Flags().GetString("target")
 	user, _ := cmd.Flags().GetString("user")
 	wordlist, _ := cmd.Flags().GetString("wordlist")
 	workers, _ := cmd.Flags().GetInt("workers")
-	rateLimit, _ := cmd.Flags().GetString("rate")
 	port, _ := cmd.Flags().GetInt("port")
 	timeout, _ := cmd.Flags().GetString("timeout")
+	rateLimit, _ := cmd.Flags().GetString("rate")
 	targetFile, _ := cmd.Flags().GetString("target-file")
 	concurrentTargets, _ := cmd.Flags().GetInt("concurrent-targets")
-
-	zlog.Debug().Msg("Starting runMikrotikV6 function")
-	zlog.Debug().
-		Str("target", target).
-		Str("user", user).
-		Str("wordlist", wordlist).
-		Int("workers", workers).
-		Str("rate", rateLimit).
-		Int("port", port).
-		Str("timeout", timeout).
-		Str("target-file", targetFile).
-		Int("concurrent-targets", concurrentTargets).
-		Msg("Flags")
 
 	rateDuration, err := time.ParseDuration(rateLimit)
 	if err != nil {
@@ -161,48 +139,77 @@ func runMikrotikV6(cmd *cobra.Command, args []string) {
 		zlog.Fatal().Err(err).Msg("Invalid timeout")
 	}
 
-	zlog.Debug().Str("wordlist", wordlist).Msg("Loading passwords from")
-	passwords, err := loadPasswords(wordlist)
+	return &AttackConfig{
+		target:            target,
+		user:              user,
+		wordlist:          wordlist,
+		workers:           workers,
+		port:              port,
+		timeout:           timeoutDuration,
+		rateLimit:         rateDuration,
+		targetFile:        targetFile,
+		concurrentTargets: concurrentTargets,
+	}
+}
+
+// runAttack executes an attack based on the configuration
+func runAttack(cfg *AttackConfig) {
+	zlog.Debug().Msg("Loading passwords from wordlist")
+	passwords, err := loadPasswords(cfg.wordlist)
 	if err != nil {
 		zlog.Fatal().Err(err).Msg("Failed to load wordlist")
 	}
 	zlog.Debug().Int("n", len(passwords)).Msg("Loaded n passwords")
 
 	// Validate that either target or target-file is specified, but not both
-	if targetFile != "" && target != "" {
+	if cfg.targetFile != "" && cfg.target != "" {
 		zlog.Fatal().Msg("Cannot specify both --target and --target-file")
 	}
 
-	if targetFile != "" {
+	if cfg.targetFile != "" {
 		// Multi-target mode
-		zlog.Info().Str("file", targetFile).Msg("Running in multi-target mode")
-		runMultiTargetV6(targetFile, wordlist, user, port, timeoutDuration, workers, rateDuration, concurrentTargets)
+		zlog.Info().Str("file", cfg.targetFile).Msg("Running in multi-target mode")
+		runMultiTarget(cfg)
 		return
 	}
 
 	// Single-target mode
-	if target == "" {
+	if cfg.target == "" {
 		zlog.Fatal().Msg("Must specify either --target or --target-file")
 	}
 
 	zlog.Info().
-		Str("target", target).
+		Str("target", cfg.target).
 		Int("passwords", len(passwords)).
-		Int("workers", workers).
-		Str("rate", rateLimit).
+		Int("workers", cfg.workers).
+		Str("rate", cfg.rateLimit.String()).
 		Msg("Starting attack")
 
-	zlog.Debug().Msg("Creating Mikrotik v6 module")
-	module := v6.NewMikrotikV6Module()
-	if err := module.Initialize(target, user, map[string]interface{}{
-		"port":    port,
-		"timeout": timeoutDuration,
+	zlog.Debug().Msg("Creating module")
+	module := cfg.moduleFactory()
+	if err := module.Initialize(cfg.target, cfg.user, map[string]interface{}{
+		"port":    cfg.port,
+		"timeout": cfg.timeout,
 	}); err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to initialize Mikrotik v6 module")
+		zlog.Fatal().Err(err).Msg("Failed to initialize module")
 	}
 
-	zlog.Debug().Int("workers", workers).Dur("ratelimit", rateDuration).Msg("Creating engine")
-	engine := core.NewEngine(workers, rateDuration)
+	// Pre-flight connection check
+	zlog.Debug().Msg("Testing connection to target...")
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.timeout)
+	if err := module.Connect(ctx); err != nil {
+		cancel()
+		zlog.Fatal().Err(err).Str("target", cfg.target).Int("port", cfg.port).Msg("Failed to connect to target")
+	}
+	cancel()
+	zlog.Info().Str("target", cfg.target).Int("port", cfg.port).Msg("Connection test successful")
+	// Close the test connection - workers will reconnect
+	if err := module.Close(); err != nil {
+		zlog.Debug().Err(err).Msg("Error closing test connection")
+	}
+
+	zlog.Debug().Int("workers", cfg.workers).Dur("ratelimit", cfg.rateLimit).Msg("Creating engine")
+	engine := core.NewEngine(cfg.workers, cfg.rateLimit)
 	engine.SetModule(module)
 	engine.LoadPasswords(passwords)
 
@@ -215,6 +222,15 @@ func runMikrotikV6(cmd *cobra.Command, args []string) {
 	zlog.Debug().Msg("Waiting for results...")
 	successCount := 0
 	totalAttempts := 0
+	errorCount := 0
+
+	// Consume errors in background
+	go func() {
+		for err := range engine.Errors() {
+			errorCount++
+			zlog.Error().Err(err).Msg("Attack error")
+		}
+	}()
 
 	for result := range engine.Results() {
 		totalAttempts++
@@ -257,468 +273,118 @@ func runMikrotikV6(cmd *cobra.Command, args []string) {
 	if successCount == 0 {
 		zlog.Info().Msg("No valid credentials found")
 	}
-	zlog.Debug().Msg("runMikrotikV6 function completed")
+	zlog.Debug().Msg("Attack completed")
+}
+
+// runMultiTarget executes a multi-target attack
+func runMultiTarget(cfg *AttackConfig) {
+	zlog.Info().Str("file", cfg.targetFile).Msg("Loading targets for multi-target attack")
+
+	// Load targets
+	parser := core.NewTargetParser("", cfg.port) // Empty default command
+	targets, err := parser.ParseTargetFile(cfg.targetFile)
+	if err != nil {
+		zlog.Fatal().Err(err).Msg("Failed to load targets")
+	}
+
+	if len(targets) == 0 {
+		zlog.Fatal().Msg("No valid targets found in file")
+	}
+
+	// Load passwords
+	passwords, err := loadPasswords(cfg.wordlist)
+	if err != nil {
+		zlog.Fatal().Err(err).Msg("Failed to load wordlist")
+	}
+
+	// Create multi-target engine
+	factory := cfg.multiFactory
+	engine := core.NewMultiTargetEngine(factory, cfg.workers, cfg.concurrentTargets, cfg.rateLimit)
+	engine.LoadTargets(targets)
+	engine.LoadPasswords(passwords)
+
+	// Start attack
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	engine.Start(ctx)
+
+	// Process results
+	successCount := 0
+	for result := range engine.GetResults() {
+		if result.Success {
+			successCount++
+			zlog.Info().
+				Str("target", result.Target.IP).
+				Str("username", result.Target.Username).
+				Str("password", result.SuccessPassword).
+				Msg("✓ Found valid credentials")
+		}
+	}
+
+	// Process errors
+	errorCount := 0
+	for err := range engine.GetErrors() {
+		zlog.Error().
+			Str("target", err.Target.IP).
+			Err(err.Error).
+			Msg("Error during attack")
+		errorCount++
+	}
+
+	zlog.Info().
+		Int("total_targets", len(targets)).
+		Int("successful_targets", successCount).
+		Int("failed_targets", errorCount).
+		Msg("Multi-target attack completed")
+
+	if successCount == 0 {
+		zlog.Info().Msg("No valid credentials found in any target")
+	}
+}
+
+func main() {
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func runMikrotikV6(cmd *cobra.Command, args []string) {
+	cfg := parseAttackConfig(cmd)
+	cfg.moduleFactory = func() interfaces.RouterModule {
+		return v6.NewMikrotikV6Module()
+	}
+	cfg.multiFactory = &v6.MikrotikV6Factory{}
+
+	zlog.Debug().Msg("Starting Mikrotik v6 attack")
+	runAttack(cfg)
+	zlog.Debug().Msg("Mikrotik v6 attack completed")
 }
 
 func runMikrotikV7(cmd *cobra.Command, args []string) {
-	target, _ := cmd.Flags().GetString("target")
-	user, _ := cmd.Flags().GetString("user")
-	wordlist, _ := cmd.Flags().GetString("wordlist")
-	workers, _ := cmd.Flags().GetInt("workers")
-	rateLimit, _ := cmd.Flags().GetString("rate")
-	port, _ := cmd.Flags().GetInt("port")
-	timeout, _ := cmd.Flags().GetString("timeout")
-	targetFile, _ := cmd.Flags().GetString("target-file")
-	concurrentTargets, _ := cmd.Flags().GetInt("concurrent-targets")
-
-	zlog.Debug().Msg("Starting runMikrotikV7 function")
-	zlog.Debug().
-		Str("target", target).
-		Str("user", user).
-		Str("wordlist", wordlist).
-		Int("workers", workers).
-		Str("rate", rateLimit).
-		Int("port", port).
-		Str("timeout", timeout).
-		Str("target-file", targetFile).
-		Int("concurrent-targets", concurrentTargets).
-		Msg("Flags")
-
-	rateDuration, err := time.ParseDuration(rateLimit)
-	if err != nil {
-		zlog.Fatal().Err(err).Msg("Invalid rate limit")
+	cfg := parseAttackConfig(cmd)
+	cfg.moduleFactory = func() interfaces.RouterModule {
+		return v7.NewMikrotikV7Module()
 	}
+	cfg.multiFactory = &v7.MikrotikV7Factory{}
 
-	timeoutDuration, err := time.ParseDuration(timeout)
-	if err != nil {
-		zlog.Fatal().Err(err).Msg("Invalid timeout")
-	}
-
-	zlog.Debug().Str("wordlist", wordlist).Msg("Loading passwords from")
-	passwords, err := loadPasswords(wordlist)
-	if err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to load wordlist")
-	}
-	zlog.Debug().Int("n", len(passwords)).Msg("Loaded n passwords")
-
-	// Validate that either target or target-file is specified, but not both
-	if targetFile != "" && target != "" {
-		zlog.Fatal().Msg("Cannot specify both --target and --target-file")
-	}
-
-	if targetFile != "" {
-		// Multi-target mode
-		zlog.Info().Str("file", targetFile).Msg("Running in multi-target mode")
-		runMultiTargetV7(targetFile, wordlist, user, port, timeoutDuration, workers, rateDuration, concurrentTargets)
-		return
-	}
-
-	// Single-target mode
-	if target == "" {
-		zlog.Fatal().Msg("Must specify either --target or --target-file")
-	}
-
-	zlog.Info().
-		Str("target", target).
-		Int("passwords", len(passwords)).
-		Int("workers", workers).
-		Str("rate", rateLimit).
-		Msg("Starting RouterOS v7 attack")
-
-	zlog.Debug().Msg("Creating Mikrotik v7 module")
-	module := v7.NewMikrotikV7Module()
-	if err := module.Initialize(target, user, map[string]interface{}{
-		"port":    port,
-		"timeout": timeoutDuration,
-	}); err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to initialize Mikrotik v7 module")
-	}
-
-	zlog.Debug().Int("workers", workers).Dur("ratelimit", rateDuration).Msg("Creating engine")
-	engine := core.NewEngine(workers, rateDuration)
-	engine.SetModule(module)
-	engine.LoadPasswords(passwords)
-
-	zlog.Debug().Msg("Starting engine...")
-	if err := engine.Start(); err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to start engine")
-	}
-	zlog.Debug().Msg("Engine started successfully")
-
-	zlog.Debug().Msg("Waiting for results...")
-	successCount := 0
-	totalAttempts := 0
-
-	for result := range engine.Results() {
-		totalAttempts++
-		zlog.Trace().
-			Int("attempt", totalAttempts).
-			Str("password", result.Password).
-			Dur("elapsed", result.TimeConsumed).
-			Msg("Received result")
-
-		if result.Success {
-			successCount++
-			zlog.Info().
-				Str("username", result.Username).
-				Str("password", result.Password).
-				Str("target", result.Target).
-				Str("module", result.ModuleName).
-				Msg("✓ SUCCESS")
-
-			zlog.Debug().Msg("Found valid credentials, stopping engine...")
-			engine.Stop()
-			zlog.Debug().Msg("Engine stopped")
-			break
-		}
-
-		if totalAttempts%10 == 0 {
-			progress := engine.Progress() * 100
-			fmt.Printf("Progress: %.1f%% (%d/%d attempts)\r", progress, totalAttempts, len(passwords))
-		}
-	}
-
-	zlog.Debug().
-		Int("total_attempts", totalAttempts).
-		Int("successes", successCount).
-		Msg("Results loop completed")
-
-	zlog.Info().Msg("RouterOS v7 attack completed")
-	zlog.Info().Int("total_attempts", totalAttempts).Msg("Total attempts")
-	zlog.Info().Int("successful_attempts", successCount).Msg("Successful authentications")
-
-	if successCount == 0 {
-		zlog.Info().Msg("No valid credentials found")
-	}
-	zlog.Debug().Msg("runMikrotikV7 function completed")
+	zlog.Debug().Msg("Starting Mikrotik v7 attack")
+	runAttack(cfg)
+	zlog.Debug().Msg("Mikrotik v7 attack completed")
 }
 
 func runMikrotikV7Rest(cmd *cobra.Command, args []string) {
-	target, _ := cmd.Flags().GetString("target")
-	user, _ := cmd.Flags().GetString("user")
-	wordlist, _ := cmd.Flags().GetString("wordlist")
-	workers, _ := cmd.Flags().GetInt("workers")
-	rateLimit, _ := cmd.Flags().GetString("rate")
-	port, _ := cmd.Flags().GetInt("port")
-	useHTTPS, _ := cmd.Flags().GetBool("https")
-	timeout, _ := cmd.Flags().GetString("timeout")
-	targetFile, _ := cmd.Flags().GetString("target-file")
-	concurrentTargets, _ := cmd.Flags().GetInt("concurrent-targets")
+	cfg := parseAttackConfig(cmd)
+	// Note: useHTTPS flag is defined but not currently used in the REST module
 
-	zlog.Debug().Msg("Starting runMikrotikV7Rest function")
-	zlog.Debug().
-		Str("target", target).
-		Str("user", user).
-		Str("wordlist", wordlist).
-		Int("workers", workers).
-		Str("rate", rateLimit).
-		Int("port", port).
-		Bool("https", useHTTPS).
-		Str("timeout", timeout).
-		Str("target-file", targetFile).
-		Int("concurrent-targets", concurrentTargets).
-		Msg("Flags")
-
-	rateDuration, err := time.ParseDuration(rateLimit)
-	if err != nil {
-		zlog.Fatal().Err(err).Msg("Invalid rate limit")
+	cfg.moduleFactory = func() interfaces.RouterModule {
+		return rest.NewMikrotikV7RestModule()
 	}
+	cfg.multiFactory = &rest.MikrotikV7RestFactory{}
 
-	timeoutDuration, err := time.ParseDuration(timeout)
-	if err != nil {
-		zlog.Fatal().Err(err).Msg("Invalid timeout")
-	}
-
-	zlog.Debug().Str("wordlist", wordlist).Msg("Loading passwords from")
-	passwords, err := loadPasswords(wordlist)
-	if err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to load wordlist")
-	}
-	zlog.Debug().Int("n", len(passwords)).Msg("Loaded n passwords")
-
-	// Validate that either target or target-file is specified, but not both
-	if targetFile != "" && target != "" {
-		zlog.Fatal().Msg("Cannot specify both --target and --target-file")
-	}
-
-	if targetFile != "" {
-		// Multi-target mode
-		zlog.Info().Str("file", targetFile).Msg("Running in multi-target mode")
-		runMultiTargetV7Rest(targetFile, wordlist, user, port, timeoutDuration, workers, rateDuration, concurrentTargets, useHTTPS)
-		return
-	}
-
-	// Single-target mode
-	if target == "" {
-		zlog.Fatal().Msg("Must specify either --target or --target-file")
-	}
-
-	zlog.Info().
-		Str("target", target).
-		Int("passwords", len(passwords)).
-		Int("workers", workers).
-		Str("rate", rateLimit).
-		Msg("Starting RouterOS v7 REST API attack")
-
-	zlog.Debug().Msg("Creating Mikrotik v7 REST module")
-	module := rest.NewMikrotikV7RestModule()
-	if err := module.Initialize(target, user, map[string]interface{}{
-		"port":    port,
-		"https":   useHTTPS,
-		"timeout": timeoutDuration,
-	}); err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to initialize Mikrotik v7 REST module")
-	}
-
-	zlog.Debug().Int("workers", workers).Dur("ratelimit", rateDuration).Msg("Creating engine")
-	engine := core.NewEngine(workers, rateDuration)
-	engine.SetModule(module)
-	engine.LoadPasswords(passwords)
-
-	zlog.Debug().Msg("Starting engine...")
-	if err := engine.Start(); err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to start engine")
-	}
-	zlog.Debug().Msg("Engine started successfully")
-
-	zlog.Debug().Msg("Waiting for results...")
-	successCount := 0
-	totalAttempts := 0
-
-	for result := range engine.Results() {
-		totalAttempts++
-		zlog.Trace().
-			Int("attempt", totalAttempts).
-			Str("password", result.Password).
-			Dur("elapsed", result.TimeConsumed).
-			Msg("Received result")
-
-		if result.Success {
-			successCount++
-			zlog.Info().
-				Str("username", result.Username).
-				Str("password", result.Password).
-				Str("target", result.Target).
-				Str("module", result.ModuleName).
-				Msg("✓ SUCCESS")
-
-			zlog.Debug().Msg("Found valid credentials, stopping engine...")
-			engine.Stop()
-			zlog.Debug().Msg("Engine stopped")
-			break
-		}
-
-		if totalAttempts%10 == 0 {
-			progress := engine.Progress() * 100
-			fmt.Printf("Progress: %.1f%% (%d/%d attempts)\r", progress, totalAttempts, len(passwords))
-		}
-	}
-
-	zlog.Debug().
-		Int("total_attempts", totalAttempts).
-		Int("successes", successCount).
-		Msg("Results loop completed")
-
-	zlog.Info().Msg("RouterOS v7 REST API attack completed")
-	zlog.Info().Int("total_attempts", totalAttempts).Msg("Total attempts")
-	zlog.Info().Int("successful_attempts", successCount).Msg("Successful authentications")
-
-	if successCount == 0 {
-		zlog.Info().Msg("No valid credentials found")
-	}
-	zlog.Debug().Msg("runMikrotikV7Rest function completed")
-}
-
-func runMultiTargetV6(targetFile, wordlist, user string, port int, timeout time.Duration,
-	workers int, rateLimit time.Duration, concurrentTargets int) {
-
-	zlog.Info().Str("file", targetFile).Msg("Loading targets for multi-target attack")
-
-	// Load targets
-	parser := core.NewTargetParser("", port) // Empty default command
-	targets, err := parser.ParseTargetFile(targetFile)
-	if err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to load targets")
-	}
-
-	if len(targets) == 0 {
-		zlog.Fatal().Msg("No valid targets found in file")
-	}
-
-	// Load passwords
-	passwords, err := loadPasswords(wordlist)
-	if err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to load wordlist")
-	}
-
-	// Create multi-target engine
-	factory := &v6.MikrotikV6Factory{}
-	engine := core.NewMultiTargetEngine(factory, workers, concurrentTargets, rateLimit)
-	engine.LoadTargets(targets)
-	engine.LoadPasswords(passwords)
-
-	// Start attack
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	engine.Start(ctx)
-
-	// Process results
-	successCount := 0
-	for result := range engine.GetResults() {
-		if result.Success {
-			successCount++
-			zlog.Info().
-				Str("target", result.Target.IP).
-				Str("username", result.Target.Username).
-				Str("password", result.SuccessPassword).
-				Msg("✓ Found valid credentials")
-		}
-	}
-
-	// Process errors
-	errorCount := 0
-	for err := range engine.GetErrors() {
-		zlog.Error().
-			Str("target", err.Target.IP).
-			Err(err.Error).
-			Msg("Target processing failed")
-		errorCount++
-	}
-
-	zlog.Info().
-		Int("total_targets", len(targets)).
-		Int("successful", successCount).
-		Int("failed", errorCount).
-		Msg("Multi-target attack summary")
-}
-
-func runMultiTargetV7(targetFile, wordlist, user string, port int, timeout time.Duration,
-	workers int, rateLimit time.Duration, concurrentTargets int) {
-
-	zlog.Info().Str("file", targetFile).Msg("Loading targets for multi-target attack")
-
-	// Load targets
-	parser := core.NewTargetParser("", port) // Empty default command
-	targets, err := parser.ParseTargetFile(targetFile)
-	if err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to load targets")
-	}
-
-	if len(targets) == 0 {
-		zlog.Fatal().Msg("No valid targets found in file")
-	}
-
-	// Load passwords
-	passwords, err := loadPasswords(wordlist)
-	if err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to load wordlist")
-	}
-
-	// Create multi-target engine
-	factory := &v7.MikrotikV7Factory{}
-	engine := core.NewMultiTargetEngine(factory, workers, concurrentTargets, rateLimit)
-	engine.LoadTargets(targets)
-	engine.LoadPasswords(passwords)
-
-	// Start attack
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	engine.Start(ctx)
-
-	// Process results
-	successCount := 0
-	for result := range engine.GetResults() {
-		if result.Success {
-			successCount++
-			zlog.Info().
-				Str("target", result.Target.IP).
-				Str("username", result.Target.Username).
-				Str("password", result.SuccessPassword).
-				Msg("✓ Found valid credentials")
-		}
-	}
-
-	// Process errors
-	errorCount := 0
-	for err := range engine.GetErrors() {
-		zlog.Error().
-			Str("target", err.Target.IP).
-			Err(err.Error).
-			Msg("Target processing failed")
-		errorCount++
-	}
-
-	zlog.Info().
-		Int("total_targets", len(targets)).
-		Int("successful", successCount).
-		Int("failed", errorCount).
-		Msg("Multi-target attack summary")
-}
-
-func runMultiTargetV7Rest(targetFile, wordlist, user string, port int, timeout time.Duration,
-	workers int, rateLimit time.Duration, concurrentTargets int, useHTTPS bool) {
-
-	zlog.Info().Str("file", targetFile).Msg("Loading targets for multi-target attack")
-
-	// Load targets
-	parser := core.NewTargetParser("", port) // Empty default command
-	targets, err := parser.ParseTargetFile(targetFile)
-	if err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to load targets")
-	}
-
-	if len(targets) == 0 {
-		zlog.Fatal().Msg("No valid targets found in file")
-	}
-
-	// Load passwords
-	passwords, err := loadPasswords(wordlist)
-	if err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to load wordlist")
-	}
-
-	// Create multi-target engine
-	factory := &rest.MikrotikV7RestFactory{}
-	engine := core.NewMultiTargetEngine(factory, workers, concurrentTargets, rateLimit)
-	engine.LoadTargets(targets)
-	engine.LoadPasswords(passwords)
-
-	// Start attack
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	engine.Start(ctx)
-
-	// Process results
-	successCount := 0
-	for result := range engine.GetResults() {
-		if result.Success {
-			successCount++
-			zlog.Info().
-				Str("target", result.Target.IP).
-				Str("username", result.Target.Username).
-				Str("password", result.SuccessPassword).
-				Msg("✓ Found valid credentials")
-		}
-	}
-
-	// Process errors
-	errorCount := 0
-	for err := range engine.GetErrors() {
-		zlog.Error().
-			Str("target", err.Target.IP).
-			Err(err.Error).
-			Msg("Target processing failed")
-		errorCount++
-	}
-
-	zlog.Info().
-		Int("total_targets", len(targets)).
-		Int("successful", successCount).
-		Int("failed", errorCount).
-		Msg("Multi-target attack summary")
+	zlog.Debug().Msg("Starting Mikrotik v7 REST attack")
+	runAttack(cfg)
+	zlog.Debug().Msg("Mikrotik v7 REST attack completed")
 }
 
 func loadPasswords(filename string) ([]string, error) {

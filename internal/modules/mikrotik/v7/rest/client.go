@@ -117,9 +117,9 @@ func (m *MikrotikV7RestModule) Close() error {
 
 // Authenticate attempts to authenticate with the given password using RouterOS v7 REST API
 func (m *MikrotikV7RestModule) Authenticate(ctx context.Context, password string) (bool, error) {
-	// Debug: Check context
+	// Validate context
 	if ctx == nil {
-		zlog.Error().Msg("nil context received in Authenticate()")
+		return false, errors.New("nil context received in Authenticate()")
 	}
 
 	zlog.Trace().Str("username", m.GetUsername()).Str("target", m.GetTarget()).Msg("Starting RouterOS v7 REST API authentication attempt")
@@ -181,9 +181,13 @@ func (m *MikrotikV7RestModule) Authenticate(ctx context.Context, password string
 	if resp.StatusCode != http.StatusOK {
 		zlog.Trace().Int("status_code", resp.StatusCode).Msg("RouterOS v7 REST API request failed with non-200 status")
 		// Read response body to get error details
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			zlog.Trace().Err(err).Msg("Failed to read error response body")
+			return false, fmt.Errorf("REST API request failed with status %d and failed to read response: %w", resp.StatusCode, err)
+		}
 		zlog.Trace().Str("response_body", string(body)).Msg("RouterOS v7 REST API error response")
-		return false, errors.New("REST API request failed with status: " + strconv.Itoa(resp.StatusCode))
+		return false, fmt.Errorf("REST API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Read and parse the response to verify it's valid JSON

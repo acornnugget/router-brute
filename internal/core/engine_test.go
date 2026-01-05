@@ -40,21 +40,25 @@ func TestEngineBasic(t *testing.T) {
 	// Check results channel
 	resultCount := 0
 	successCount := 0
+	timeout := time.After(200 * time.Millisecond)
+collecting:
 	for {
 		select {
-		case result := <-engine.Results():
+		case result, ok := <-engine.Results():
+			if !ok {
+				break collecting
+			}
 			resultCount++
 			if result.Success {
 				successCount++
 			}
 			if resultCount >= len(passwords) {
-				goto done
+				break collecting
 			}
-		case <-time.After(200 * time.Millisecond):
-			goto done
+		case <-timeout:
+			break collecting
 		}
 	}
-done:
 
 	if resultCount == 0 {
 		t.Error("Expected some results, got none")

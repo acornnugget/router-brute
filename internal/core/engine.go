@@ -22,6 +22,8 @@ type Engine struct {
 	wg            sync.WaitGroup
 	startTime     time.Time
 	module        interfaces.RouterModule
+	closed        bool
+	closeMu       sync.Mutex
 }
 
 // GetResults returns the channel for receiving authentication results
@@ -88,7 +90,7 @@ func (e *Engine) Start() error {
 	if e.ctx == nil {
 		var cancel context.CancelFunc
 		e.ctx, cancel = context.WithCancel(context.Background())
-		defer cancel()
+		e.cancelFunc = cancel
 	}
 
 	e.startTime = time.Now()
@@ -98,6 +100,12 @@ func (e *Engine) Start() error {
 		e.wg.Add(1)
 		go e.worker(i)
 	}
+
+	// Auto-close channels when all workers complete
+	go func() {
+		e.wg.Wait()
+		e.closeChannels()
+	}()
 
 	return nil
 }
@@ -131,6 +139,7 @@ func (e *Engine) worker(id int) {
 	// Connect the module if not already connected
 	if e.module != nil && !e.module.IsConnected() {
 		if err := e.module.Connect(e.ctx); err != nil {
+			zlog.Error().Err(err).Int("worker_id", id).Msg("Worker failed to connect")
 			select {
 			case e.errors <- err:
 			case <-e.ctx.Done():
@@ -193,9 +202,22 @@ func (e *Engine) worker(id int) {
 	}
 }
 
+// closeChannels safely closes channels only once
+func (e *Engine) closeChannels() {
+	e.closeMu.Lock()
+	defer e.closeMu.Unlock()
+	if !e.closed {
+		e.closed = true
+		close(e.results)
+		close(e.errors)
+	}
+}
+
 // Stop gracefully shuts down the engine
 func (e *Engine) Stop() {
-	e.cancelFunc()
+	if e.cancelFunc != nil {
+		e.cancelFunc()
+	}
 	e.wg.Wait()
 
 	// Close the module connection
@@ -205,20 +227,23 @@ func (e *Engine) Stop() {
 		}
 	}
 
-	close(e.results)
-	close(e.errors)
+	e.closeChannels()
 }
 
 // Close cleans up the engine resources
 func (e *Engine) Close() {
+	// Cancel the context to signal workers to stop
+	if e.cancelFunc != nil {
+		e.cancelFunc()
+	}
+
 	e.wg.Wait()
 	if e.module != nil {
 		if err := e.module.Close(); err != nil {
 			zlog.Trace().Err(err).Msg("Error closing module connection")
 		}
 	}
-	close(e.results)
-	close(e.errors)
+	e.closeChannels()
 }
 
 // Results returns the channel for receiving results

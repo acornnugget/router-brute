@@ -28,12 +28,12 @@ type MultiTargetError struct {
 
 // MultiTargetEngine handles concurrent attacks on multiple targets
 type MultiTargetEngine struct {
-	moduleFactory    interfaces.ModuleFactory
-	targets          []*Target
+	moduleFactory     interfaces.ModuleFactory
+	targets           []*Target
 	concurrentTargets int
-	passwords        []string
-	workersPerTarget int
-	rateLimit        time.Duration
+	passwords         []string
+	workersPerTarget  int
+	rateLimit         time.Duration
 
 	resultsChan chan MultiTargetResult
 	errorsChan  chan MultiTargetError
@@ -49,12 +49,12 @@ func NewMultiTargetEngine(
 	rateLimit time.Duration,
 ) *MultiTargetEngine {
 	return &MultiTargetEngine{
-		moduleFactory:    moduleFactory,
+		moduleFactory:     moduleFactory,
 		concurrentTargets: concurrentTargets,
-		workersPerTarget: workersPerTarget,
-		rateLimit:        rateLimit,
-		resultsChan:      make(chan MultiTargetResult, concurrentTargets),
-		errorsChan:       make(chan MultiTargetError, concurrentTargets),
+		workersPerTarget:  workersPerTarget,
+		rateLimit:         rateLimit,
+		resultsChan:       make(chan MultiTargetResult, concurrentTargets),
+		errorsChan:        make(chan MultiTargetError, concurrentTargets),
 	}
 }
 
@@ -133,49 +133,66 @@ func (mte *MultiTargetEngine) processTarget(target *Target, semaphore chan struc
 	// Create engine for this target
 	engine := NewEngine(mte.workersPerTarget, mte.rateLimit)
 	engine.SetModule(module)
-	engine.LoadPasswords(mte.passwords)
+
+	// Create a copy of passwords for this target to ensure isolation
+	passwordsCopy := make([]string, len(mte.passwords))
+	copy(passwordsCopy, mte.passwords)
+	engine.LoadPasswords(passwordsCopy)
 
 	// Run the attack
 	engine.StartWithContext(mte.ctx)
 
-	// Wait for the engine to complete
-	zlog.Debug().Str("target", target.IP).Msg("Waiting for engine completion")
-	engine.WaitForCompletion()
-	zlog.Debug().Str("target", target.IP).Msg("Engine completed")
-
-	// Close the engine to clean up resources
-	zlog.Debug().Str("target", target.IP).Msg("Closing engine")
-	engine.Close()
-	zlog.Debug().Str("target", target.IP).Msg("Engine closed")
-
-	// Collect results
+	// Collect results while workers are running
 	var results []Result
 	var successPassword string
 	var success bool
 
-	zlog.Debug().Str("target", target.IP).Msg("Collecting results")
-	for result := range engine.GetResults() {
-		results = append(results, result)
-		if result.Success {
-			success = true
-			successPassword = result.Password
-			zlog.Info().
-				Str("target", target.IP).
-				Str("username", target.Username).
-				Str("password", result.Password).
-				Dur("time", result.TimeConsumed).
-				Msg("✓ Found valid credentials")
+	// Use a separate goroutine to collect results while workers run
+	resultsDone := make(chan struct{})
+	go func() {
+		defer close(resultsDone)
+		zlog.Debug().Str("target", target.IP).Msg("Collecting results")
+		for result := range engine.Results() {
+			results = append(results, result)
+			if result.Success {
+				success = true
+				successPassword = result.Password
+				zlog.Info().
+					Str("target", target.IP).
+					Str("username", target.Username).
+					Str("password", result.Password).
+					Dur("time", result.TimeConsumed).
+					Msg("✓ Found valid credentials")
+			}
 		}
-	}
-	zlog.Debug().Str("target", target.IP).Int("results", len(results)).Msg("Results collected")
+		zlog.Debug().Str("target", target.IP).Int("results", len(results)).Msg("Results collected")
+	}()
 
-	// Check for errors
-	for err := range engine.GetErrors() {
-		zlog.Warn().
-			Str("target", target.IP).
-			Err(err).
-			Msg("Error during attack")
-	}
+	// Collect errors in a separate goroutine
+	errorsDone := make(chan struct{})
+	go func() {
+		defer close(errorsDone)
+		for err := range engine.Errors() {
+			zlog.Warn().
+				Str("target", target.IP).
+				Err(err).
+				Msg("Error during attack")
+		}
+	}()
+
+	// Wait for the engine workers to complete
+	zlog.Debug().Str("target", target.IP).Msg("Waiting for engine completion")
+	engine.WaitForCompletion()
+	zlog.Debug().Str("target", target.IP).Msg("Engine completed")
+
+	// Close the engine - this closes the channels which will unblock the collector goroutines
+	zlog.Debug().Str("target", target.IP).Msg("Closing engine")
+	engine.Close()
+	zlog.Debug().Str("target", target.IP).Msg("Engine closed")
+
+	// Wait for result and error collectors to finish
+	<-resultsDone
+	<-errorsDone
 
 	endTime := time.Now()
 	duration := endTime.Sub(startTime)

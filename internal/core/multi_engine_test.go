@@ -6,88 +6,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nimda/router-brute/internal/interfaces"
+	"github.com/nimda/router-brute/internal/testutil"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
-
-// MockModuleFactory for testing
-type MockModuleFactory struct {
-	mock.Mock
-}
-
-func (m *MockModuleFactory) CreateModule() interfaces.RouterModule {
-	args := m.Called()
-	return args.Get(0).(interfaces.RouterModule)
-}
-
-func (m *MockModuleFactory) GetProtocolName() string {
-	args := m.Called()
-	return args.String(0)
-}
-
-// MockRouterModule for testing
-type MockRouterModule struct {
-	mock.Mock
-}
-
-func (m *MockRouterModule) Initialize(target, username string, options map[string]interface{}) error {
-	args := m.Called(target, username, options)
-	return args.Error(0)
-}
-
-func (m *MockRouterModule) Connect(ctx context.Context) error {
-	args := m.Called(ctx)
-	return args.Error(0)
-}
-
-func (m *MockRouterModule) Authenticate(ctx context.Context, password string) (bool, error) {
-	args := m.Called(ctx, password)
-	return args.Bool(0), args.Error(1)
-}
-
-func (m *MockRouterModule) Close() error {
-	args := m.Called()
-	return args.Error(0)
-}
-
-func (m *MockRouterModule) GetProtocolName() string {
-	args := m.Called()
-	return args.String(0)
-}
-
-func (m *MockRouterModule) GetTarget() string {
-	args := m.Called()
-	return args.String(0)
-}
-
-func (m *MockRouterModule) GetUsername() string {
-	args := m.Called()
-	return args.String(0)
-}
-
-func (m *MockRouterModule) IsConnected() bool {
-	args := m.Called()
-	return args.Bool(0)
-}
 
 func TestMultiTargetEngine_Basic(t *testing.T) {
 	// Create mock module factory
-	mockFactory := new(MockModuleFactory)
-	mockModule := new(MockRouterModule)
+	mockFactory := new(testutil.MockModuleFactory)
+	mockModule := testutil.NewMockModuleWithPassword("password2")
 
 	// Setup mock expectations
 	mockFactory.On("CreateModule").Return(mockModule)
 	mockFactory.On("GetProtocolName").Return("mock")
-	mockModule.On("Initialize", "192.168.1.1", "admin", mock.Anything).Return(nil)
-	mockModule.On("Connect", mock.Anything).Return(nil)
-	mockModule.On("Authenticate", mock.Anything, "password1").Return(false, nil)
-	mockModule.On("Authenticate", mock.Anything, "password2").Return(true, nil)
-	mockModule.On("Close").Return(nil)
-	mockModule.On("GetProtocolName").Return("mock")
-	mockModule.On("GetTarget").Return("192.168.1.1")
-	mockModule.On("GetUsername").Return("admin")
-	mockModule.On("IsConnected").Return(false)
 
 	// Create engine with 1 worker to simplify debugging
 	engine := NewMultiTargetEngine(mockFactory, 1, 1, 100*time.Millisecond)
@@ -104,21 +34,10 @@ func TestMultiTargetEngine_Basic(t *testing.T) {
 
 	engine.Start(ctx)
 
-	// Collect results with timeout
+	// Collect results - channels will be closed when complete
 	var results []MultiTargetResult
-	resultsCollected := make(chan bool)
-	go func() {
-		for result := range engine.GetResults() {
-			results = append(results, result)
-		}
-		resultsCollected <- true
-	}()
-
-	select {
-	case <-resultsCollected:
-		// Results collected successfully
-	case <-time.After(6 * time.Second):
-		t.Fatal("Test timed out waiting for results")
+	for result := range engine.GetResults() {
+		results = append(results, result)
 	}
 
 	// Verify results
@@ -127,60 +46,26 @@ func TestMultiTargetEngine_Basic(t *testing.T) {
 	assert.Equal(t, "password2", results[0].SuccessPassword)
 	assert.Equal(t, 2, results[0].Attempts)
 
-	// Verify no errors with timeout
-	var errors []MultiTargetError
-	errorsCollected := make(chan bool)
-	go func() {
-		for err := range engine.GetErrors() {
-			errors = append(errors, err)
-		}
-		errorsCollected <- true
-	}()
-
-	select {
-	case <-errorsCollected:
-		// Errors collected successfully
-	case <-time.After(2 * time.Second):
-		t.Fatal("Test timed out waiting for errors")
+	// Verify no errors
+	var errs []MultiTargetError
+	for err := range engine.GetErrors() {
+		errs = append(errs, err)
 	}
-
-	assert.Len(t, errors, 0)
+	assert.Len(t, errs, 0)
 
 	mockFactory.AssertExpectations(t)
-	mockModule.AssertExpectations(t)
 }
 
 func TestMultiTargetEngine_ConcurrentTargets(t *testing.T) {
 	// Create mock module factory
-	mockFactory := new(MockModuleFactory)
-	mockModule1 := new(MockRouterModule)
-	mockModule2 := new(MockRouterModule)
+	mockFactory := new(testutil.MockModuleFactory)
+	mockModule1 := testutil.NewMockModuleWithPassword("") // No success password
+	mockModule2 := testutil.NewMockModuleWithPassword("password2")
 
 	// Setup mock expectations for first target
 	mockFactory.On("CreateModule").Return(mockModule1).Once()
 	mockFactory.On("CreateModule").Return(mockModule2).Once()
 	mockFactory.On("GetProtocolName").Return("mock")
-
-	mockModule1.On("Initialize", "192.168.1.1", "admin", mock.Anything).Return(nil)
-	mockModule1.On("Connect", mock.Anything).Return(nil)
-	mockModule1.On("Authenticate", mock.Anything, "password1").Return(false, nil)
-	mockModule1.On("Authenticate", mock.Anything, "password2").Return(false, nil)
-	mockModule1.On("Close").Return(nil)
-	mockModule1.On("GetProtocolName").Return("mock")
-	mockModule1.On("GetTarget").Return("192.168.1.1")
-	mockModule1.On("GetUsername").Return("admin")
-	mockModule1.On("IsConnected").Return(false) // Allow unlimited calls
-
-	// Setup mock expectations for second target
-	mockModule2.On("Initialize", "192.168.1.2", "admin", mock.Anything).Return(nil)
-	mockModule2.On("Connect", mock.Anything).Return(nil)
-	mockModule2.On("Authenticate", mock.Anything, "password1").Return(false, nil)
-	mockModule2.On("Authenticate", mock.Anything, "password2").Return(true, nil)
-	mockModule2.On("Close").Return(nil)
-	mockModule2.On("GetProtocolName").Return("mock")
-	mockModule2.On("GetTarget").Return("192.168.1.2")
-	mockModule2.On("GetUsername").Return("admin")
-	mockModule2.On("IsConnected").Return(false) // Allow unlimited calls
 
 	// Create engine with 2 concurrent targets
 	engine := NewMultiTargetEngine(mockFactory, 2, 2, 100*time.Millisecond)
@@ -206,7 +91,7 @@ func TestMultiTargetEngine_ConcurrentTargets(t *testing.T) {
 
 	// Verify results (order may vary due to concurrency)
 	assert.Len(t, results, 2)
-	
+
 	// Find the results for each target
 	var result1, result2 *MultiTargetResult
 	for _, result := range results {
@@ -216,12 +101,12 @@ func TestMultiTargetEngine_ConcurrentTargets(t *testing.T) {
 			result2 = &result
 		}
 	}
-	
+
 	// First target should fail
 	assert.NotNil(t, result1)
 	assert.False(t, result1.Success)
 	assert.Equal(t, 2, result1.Attempts)
-	
+
 	// Second target should succeed
 	assert.NotNil(t, result2)
 	assert.True(t, result2.Success)
@@ -242,21 +127,12 @@ func TestMultiTargetEngine_ConcurrentTargets(t *testing.T) {
 
 func TestMultiTargetEngine_Cancellation(t *testing.T) {
 	// Create mock module factory
-	mockFactory := new(MockModuleFactory)
-	mockModule := new(MockRouterModule)
+	mockFactory := new(testutil.MockModuleFactory)
+	mockModule := testutil.NewMockModuleWithPassword("") // No success password
 
 	// Setup mock expectations
 	mockFactory.On("CreateModule").Return(mockModule)
 	mockFactory.On("GetProtocolName").Return("mock")
-	mockModule.On("Initialize", "192.168.1.1", "admin", mock.Anything).Return(nil)
-	mockModule.On("Connect", mock.Anything).Return(nil)
-	// Mock Authenticate to handle any calls that might happen before cancellation
-	mockModule.On("Authenticate", mock.Anything, mock.Anything).Return(false, nil)
-	mockModule.On("Close").Return(nil)
-	mockModule.On("GetProtocolName").Return("mock")
-	mockModule.On("GetTarget").Return("192.168.1.1")
-	mockModule.On("GetUsername").Return("admin")
-	mockModule.On("IsConnected").Return(false)
 
 	// Create engine
 	engine := NewMultiTargetEngine(mockFactory, 2, 1, 100*time.Millisecond)
@@ -292,15 +168,15 @@ func TestMultiTargetEngine_Cancellation(t *testing.T) {
 
 func TestMultiTargetEngine_ErrorHandling(t *testing.T) {
 	errExpected := errors.New("initialization failed")
-	
-	// Create mock module factory
-	mockFactory := new(MockModuleFactory)
-	mockModule := new(MockRouterModule)
 
-	// Setup mock expectations - initialization will fail
+	// Create mock module factory
+	mockFactory := new(testutil.MockModuleFactory)
+	// Create a mock module that will fail on Initialize
+	mockModule := testutil.NewMockModuleWithInitError(errExpected)
+
+	// Setup mock expectations - factory will return the failing module
 	mockFactory.On("CreateModule").Return(mockModule)
 	mockFactory.On("GetProtocolName").Return("mock")
-	mockModule.On("Initialize", "192.168.1.1", "admin", mock.Anything).Return(errExpected)
 
 	// Create engine
 	engine := NewMultiTargetEngine(mockFactory, 2, 1, 100*time.Millisecond)
@@ -325,14 +201,13 @@ func TestMultiTargetEngine_ErrorHandling(t *testing.T) {
 	assert.Len(t, results, 0)
 
 	// Collect errors
-	var errors []MultiTargetError
+	var errs []MultiTargetError
 	for err := range engine.GetErrors() {
-		errors = append(errors, err)
+		errs = append(errs, err)
 	}
-	assert.Len(t, errors, 1)
-	assert.Equal(t, errExpected, errors[0].Error)
-	assert.Equal(t, "192.168.1.1", errors[0].Target.IP)
+	assert.Len(t, errs, 1)
+	assert.Equal(t, errExpected, errs[0].Error)
+	assert.Equal(t, "192.168.1.1", errs[0].Target.IP)
 
 	mockFactory.AssertExpectations(t)
-	mockModule.AssertExpectations(t)
 }

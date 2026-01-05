@@ -41,12 +41,15 @@ func reverseSlice(slice []byte) []byte {
 }
 
 // webEncode converts binary data to WebFig encoding format
-func webEncode(data []byte) string {
+func webEncode(data []byte) (string, error) {
 	decoder := charmap.ISO8859_1.NewDecoder()
-	decodedData, _ := decoder.Bytes(data)
+	decodedData, err := decoder.Bytes(data)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode data: %w", err)
+	}
 	convertedData := bytes.ReplaceAll(decodedData, []byte{0}, []byte{0xc4, 0x80})
 
-	return string(convertedData)
+	return string(convertedData), nil
 }
 
 // webDecode converts WebFig encoding back to binary data
@@ -142,9 +145,13 @@ func sendPublicKey(webfigURL string, publicKey []byte, httpClient *http.Client) 
 	payload = append(payload, reverseSlice(publicKey)...)
 
 	// Send POST request to jsproxy endpoint
-	resp, err := httpClient.Post(webfigURL, "application/octet-stream", bytes.NewReader([]byte(webEncode(payload))))
+	encodedPayload, err := webEncode(payload)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to encode payload: %w", err)
+	}
+	resp, err := httpClient.Post(webfigURL, "application/octet-stream", bytes.NewReader([]byte(encodedPayload)))
+	if err != nil {
+		return "", fmt.Errorf("failed to send POST request: %w", err)
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {

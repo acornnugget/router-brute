@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nimda/router-brute/internal/modules/mikrotik/common"
+
 	"github.com/nimda/router-brute/internal/interfaces"
 	"github.com/nimda/router-brute/internal/modules"
 	"github.com/nimda/router-brute/pkg/utils"
@@ -112,9 +114,9 @@ func (m *MikrotikV6Module) Close() error {
 
 // Authenticate attempts to authenticate with the given password
 func (m *MikrotikV6Module) Authenticate(ctx context.Context, password string) (bool, error) {
-	// Debug: Check context
+	// Validate context
 	if ctx == nil {
-		zlog.Error().Msg("ERROR: nil context received in Authenticate()")
+		return false, fmt.Errorf("nil context received in Authenticate()")
 	}
 
 	// Always disconnect and reconnect for each attempt to avoid session issues
@@ -178,19 +180,10 @@ func (m *MikrotikV6Module) sendLogin(user string, password string) error {
 
 func buildLoginCommand(username, password string) []byte {
 	var buf []byte
-	buf = appendLengthPrefixed(buf, "/login")
-	buf = appendLengthPrefixed(buf, "=name="+username)
-	buf = appendLengthPrefixed(buf, "=password="+password)
+	buf = common.AppendLengthPrefixed(buf, "/login")
+	buf = common.AppendLengthPrefixed(buf, "=name="+username)
+	buf = common.AppendLengthPrefixed(buf, "=password="+password)
 	buf = append(buf, 0x00)
-	return buf
-}
-func appendLengthPrefixed(buf []byte, word string) []byte {
-	wordBytes := []byte(word)
-	if len(wordBytes) > 255 {
-		wordBytes = wordBytes[:255]
-	}
-	buf = append(buf, byte(len(wordBytes)))
-	buf = append(buf, wordBytes...)
 	return buf
 }
 

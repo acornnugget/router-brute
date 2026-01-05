@@ -60,12 +60,10 @@ func TestParseTargetLine_EmptyFields(t *testing.T) {
 	parser := NewTargetParser("default_cmd", 8728)
 	target, err := parser.ParseTargetLine(":::192.168.1.1")
 
-	assert.NoError(t, err)
-	assert.NotNil(t, target)
-	assert.Equal(t, "admin", target.Username) // Should default
-	assert.Equal(t, "", target.IP) // Empty because first field is empty
-	assert.Equal(t, 8728, target.Port) // Should default
-	assert.Equal(t, "default_cmd", target.Command) // Should default
+	// Should return error because IP cannot be empty
+	assert.Error(t, err)
+	assert.Nil(t, target)
+	assert.Contains(t, err.Error(), "target IP cannot be empty")
 }
 
 func TestParseTargetLine_InvalidPort(t *testing.T) {
