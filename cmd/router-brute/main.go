@@ -81,11 +81,23 @@ func init() {
 func setupProtocolCommand(cmd *cobra.Command, defaultPort int) {
 	addCommonFlags(cmd, defaultPort)
 
-	if err := cmd.MarkFlagRequired("target"); err != nil {
-		log.Fatalf("Failed to mark target flag as required: %v", err)
-	}
+	// Mark wordlist as required
 	if err := cmd.MarkFlagRequired("wordlist"); err != nil {
 		log.Fatalf("Failed to mark wordlist flag as required: %v", err)
+	}
+
+	// Add custom validation for target/target-file requirement
+	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+		target, _ := cmd.Flags().GetString("target")
+		targetFile, _ := cmd.Flags().GetString("target-file")
+
+		if target == "" && targetFile == "" {
+			return fmt.Errorf("either --target or --target-file must be specified")
+		}
+		if target != "" && targetFile != "" {
+			return fmt.Errorf("cannot specify both --target and --target-file")
+		}
+		return nil
 	}
 }
 
@@ -161,11 +173,6 @@ func runAttack(cfg *AttackConfig) {
 	}
 	zlog.Debug().Int("n", len(passwords)).Msg("Loaded n passwords")
 
-	// Validate that either target or target-file is specified, but not both
-	if cfg.targetFile != "" && cfg.target != "" {
-		zlog.Fatal().Msg("Cannot specify both --target and --target-file")
-	}
-
 	if cfg.targetFile != "" {
 		// Multi-target mode
 		zlog.Info().Str("file", cfg.targetFile).Msg("Running in multi-target mode")
@@ -174,9 +181,6 @@ func runAttack(cfg *AttackConfig) {
 	}
 
 	// Single-target mode
-	if cfg.target == "" {
-		zlog.Fatal().Msg("Must specify either --target or --target-file")
-	}
 
 	zlog.Info().
 		Str("target", cfg.target).
