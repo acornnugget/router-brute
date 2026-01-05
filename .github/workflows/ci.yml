@@ -62,24 +62,36 @@ jobs:
     needs: build-and-test
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    
+
+    permissions:
+      contents: write   # REQUIRED to create releases
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
+      - name: Checkout code
+        uses: actions/checkout@v6
 
-    - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version: '1.24'
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
 
-    - name: Create release directory
-      run: mkdir -p release
+      - name: Create release directory
+        run: mkdir -p release
 
-    - name: Build release
-      run: make release
+      - name: Build release
+        run: make release
 
-    - name: Upload release artifacts
-      uses: actions/upload-artifact@v6
-      with:
-        name: router-brute-release
-        path: release/
+      - name: Generate release metadata
+        id: meta
+        run: |
+          echo "tag=main-$(date +%Y%m%d%H%M%S)-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          echo "name=Main build ${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release and upload assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.meta.outputs.tag }}" \
+            release/* \
+            --title "${{ steps.meta.outputs.name }}" \
+            --notes "Automated build from main @ ${GITHUB_SHA}"
