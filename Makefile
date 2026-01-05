@@ -17,7 +17,7 @@ clean:
 # Run tests
 test:
 	@echo "Running tests..."
-	go test -v ./internal/... ./pkg/... ./cmd/...
+		go test ./internal/... ./pkg/... ./cmd/...
 	@echo "Tests complete"
 
 # Format code
