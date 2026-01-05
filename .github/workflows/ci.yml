@@ -10,7 +10,10 @@ jobs:
   build-and-test:
     name: Build and Test
     runs-on: ubuntu-latest
-    
+
+    env:
+      GOLANGCI_LINT_VERSION: v2.7.2
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v6
@@ -32,11 +35,19 @@ jobs:
     - name: Format check
       run: make fmt
 
-    - name: Install golangci-lint from source
+    - name: Cache golangci-lint binary
+      id: cache-golangci
+      uses: actions/cache@v5
+      with:
+        path: /usr/local/bin/golangci-lint
+        key: golangci-lint-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}
+
+    - name: Build and install golangci-lint from source
+      if: steps.cache-golangci.outputs.cache-hit != 'true'
       run: |
         git clone https://github.com/golangci/golangci-lint.git /tmp/golangci-lint
         cd /tmp/golangci-lint
-        git checkout v2.7.2  # Use a specific version or latest stable
+        git checkout ${GOLANGCI_LINT_VERSION}
         make build
         sudo cp ./golangci-lint /usr/local/bin/
 
