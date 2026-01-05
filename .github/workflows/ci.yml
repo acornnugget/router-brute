@@ -40,6 +40,9 @@ jobs:
         make build
         sudo cp ./golangci-lint /usr/local/bin/
 
+    - name: Show versions
+      run: go env && golangci-lint --version
+
     - name: Lint
       run: make lint
 
