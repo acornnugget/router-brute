@@ -21,10 +21,11 @@ import (
 // MikrotikV6Module implements the RouterOS v6 API protocol
 type MikrotikV6Module struct {
 	*modules.BaseRouterModule
-	mu      sync.Mutex // Protects conn and authentication operations
-	conn    net.Conn
-	port    int
-	timeout time.Duration
+	mu             sync.Mutex // Protects conn and authentication operations
+	conn           net.Conn
+	port           int
+	timeout        time.Duration
+	attemptsOnConn int // Track attempts on current connection (max 4 before reconnect)
 }
 
 // NewMikrotikV6Module creates a new Mikrotik RouterOS v6 module
@@ -111,6 +112,7 @@ func (m *MikrotikV6Module) Close() error {
 	}
 	m.SetConnected(false)
 	m.conn = nil
+	m.attemptsOnConn = 0 // Reset attempt counter
 	return nil
 }
 
@@ -125,16 +127,29 @@ func (m *MikrotikV6Module) Authenticate(ctx context.Context, password string) (b
 		return false, fmt.Errorf("nil context received in Authenticate()")
 	}
 
-	// Always disconnect and reconnect for each attempt to avoid session issues
-	if m.IsConnected() {
+	// RouterOS v6 limit: 5 failed auth attempts per connection
+	// After 5th attempt, router sends "!fatal too many commands before login" and closes connection
+	// We reconnect after 4 attempts to stay safely under the limit and maximize connection reuse
+	if m.IsConnected() && m.attemptsOnConn >= 4 {
+		zlog.Debug().
+			Str("target", m.GetTarget()).
+			Int("attempts", m.attemptsOnConn).
+			Msg("Reconnecting after reaching attempt limit")
 		if err := m.Close(); err != nil {
-			zlog.Trace().Err(err).Msg("Error closing v6 connection during reauthentication")
+			zlog.Trace().Err(err).Msg("Error closing v6 connection before reconnect")
 		}
 	}
 
-	if err := m.Connect(ctx); err != nil {
-		return false, err
+	// Connect if not connected
+	if !m.IsConnected() {
+		if err := m.Connect(ctx); err != nil {
+			return false, err
+		}
+		m.attemptsOnConn = 0 // Reset counter on new connection
 	}
+
+	// Increment attempt counter before sending login
+	m.attemptsOnConn++
 
 	// Send the command
 	if err := m.sendLogin(m.GetUsername(), password); err != nil {

@@ -23,13 +23,14 @@ import (
 // RouterOS v7 uses WebFig protocol with encryption and M2 message format
 type MikrotikV7Module struct {
 	*modules.BaseRouterModule
-	mu         sync.Mutex // Protects conn and authentication operations
-	conn       net.Conn
-	port       int
-	timeout    time.Duration
-	httpClient *http.Client
-	webfigURL  string
-	useWebFig  bool
+	mu             sync.Mutex // Protects conn and authentication operations
+	conn           net.Conn
+	port           int
+	timeout        time.Duration
+	httpClient     *http.Client
+	webfigURL      string
+	useWebFig      bool
+	attemptsOnConn int // Track attempts on current connection (max 4 before reconnect, binary mode only)
 }
 
 // NewMikrotikV7Module creates a new Mikrotik RouterOS v7 module
@@ -154,6 +155,7 @@ func (m *MikrotikV7Module) Close() error {
 	}
 	m.SetConnected(false)
 	m.conn = nil
+	m.attemptsOnConn = 0 // Reset attempt counter
 
 	zlog.Debug().Msg("Connection closed")
 
@@ -173,22 +175,38 @@ func (m *MikrotikV7Module) Authenticate(ctx context.Context, password string) (b
 
 	zlog.Trace().Str("username", m.GetUsername()).Str("target", m.GetTarget()).Msg("Starting RouterOS v7 authentication attempt")
 
-	// Always disconnect and reconnect for each attempt to avoid session issues
-	if m.IsConnected() {
-		zlog.Trace().Msg("Closing existing connection for fresh authentication attempt")
+	// For WebFig, each HTTP request is independent - no connection reuse needed
+	if m.useWebFig {
+		if err := m.Connect(ctx); err != nil {
+			zlog.Trace().Err(err).Msg("Connection failed during authentication")
+			return false, err
+		}
+		return m.authenticateWebFig(ctx, password)
+	}
+
+	// For binary API, reuse connection up to 4 attempts to stay under the 5-attempt limit
+	// (RouterOS v7 binary API likely has similar limits to v6)
+	if m.IsConnected() && m.attemptsOnConn >= 4 {
+		zlog.Debug().
+			Str("target", m.GetTarget()).
+			Int("attempts", m.attemptsOnConn).
+			Msg("Reconnecting after reaching attempt limit")
 		if err := m.Close(); err != nil {
-			zlog.Trace().Err(err).Msg("Error closing v7 connection during reauthentication")
+			zlog.Trace().Err(err).Msg("Error closing v7 connection before reconnect")
 		}
 	}
 
-	if err := m.Connect(ctx); err != nil {
-		zlog.Trace().Err(err).Msg("Connection failed during authentication")
-		return false, err
+	// Connect if not connected
+	if !m.IsConnected() {
+		if err := m.Connect(ctx); err != nil {
+			zlog.Trace().Err(err).Msg("Connection failed during authentication")
+			return false, err
+		}
+		m.attemptsOnConn = 0 // Reset counter on new connection
 	}
 
-	if m.useWebFig {
-		return m.authenticateWebFig(ctx, password)
-	}
+	// Increment attempt counter (binary mode only)
+	m.attemptsOnConn++
 
 	// Legacy binary API authentication (for compatibility)
 	return m.authenticateBinary(ctx, password)

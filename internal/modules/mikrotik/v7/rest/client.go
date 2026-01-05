@@ -130,20 +130,16 @@ func (m *MikrotikV7RestModule) Authenticate(ctx context.Context, password string
 
 	zlog.Trace().Str("username", m.GetUsername()).Str("target", m.GetTarget()).Msg("Starting RouterOS v7 REST API authentication attempt")
 
-	// Always disconnect and reconnect for each attempt to avoid session issues
-	if m.IsConnected() {
-		zlog.Trace().Msg("Closing existing connection for fresh authentication attempt")
-		if err := m.Close(); err != nil {
-			zlog.Trace().Err(err).Msg("Error closing v7 REST connection during reauthentication")
+	// Ensure we're connected (for REST API this is just a flag, actual connection is per-request)
+	if !m.IsConnected() {
+		if err := m.Connect(ctx); err != nil {
+			zlog.Trace().Err(err).Msg("Connection failed during authentication")
+			return false, err
 		}
 	}
 
-	if err := m.Connect(ctx); err != nil {
-		zlog.Trace().Err(err).Msg("Connection failed during authentication")
-		return false, err
-	}
-
 	// Test authentication by making a simple REST API call
+	// Note: HTTP client automatically reuses connections via keep-alive
 	// We'll try to access a basic system resource endpoint
 	testURL := fmt.Sprintf("%s/system/resource", m.baseURL)
 
