@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nimda/router-brute/internal/interfaces"
@@ -22,6 +23,7 @@ import (
 // RouterOS v7 uses WebFig protocol with encryption and M2 message format
 type MikrotikV7Module struct {
 	*modules.BaseRouterModule
+	mu         sync.Mutex // Protects conn and authentication operations
 	conn       net.Conn
 	port       int
 	timeout    time.Duration
@@ -160,6 +162,10 @@ func (m *MikrotikV7Module) Close() error {
 
 // Authenticate attempts to authenticate with the given password using RouterOS v7 protocol
 func (m *MikrotikV7Module) Authenticate(ctx context.Context, password string) (bool, error) {
+	// Lock to prevent concurrent authentication attempts from racing on connection
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// Validate context
 	if ctx == nil {
 		return false, fmt.Errorf("nil context received in Authenticate()")

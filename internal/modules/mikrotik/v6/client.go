@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nimda/router-brute/internal/modules/mikrotik/common"
@@ -20,6 +21,7 @@ import (
 // MikrotikV6Module implements the RouterOS v6 API protocol
 type MikrotikV6Module struct {
 	*modules.BaseRouterModule
+	mu      sync.Mutex // Protects conn and authentication operations
 	conn    net.Conn
 	port    int
 	timeout time.Duration
@@ -114,6 +116,10 @@ func (m *MikrotikV6Module) Close() error {
 
 // Authenticate attempts to authenticate with the given password
 func (m *MikrotikV6Module) Authenticate(ctx context.Context, password string) (bool, error) {
+	// Lock to prevent concurrent authentication attempts from racing on connection
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// Validate context
 	if ctx == nil {
 		return false, fmt.Errorf("nil context received in Authenticate()")
@@ -150,7 +156,11 @@ func (m *MikrotikV6Module) sendLogin(user string, password string) error {
 		return errors.New("not connected")
 	}
 	command := buildLoginCommand(user, password)
-	zlog.Debug().Str("password", password).Msg("Trying:")
+	zlog.Debug().
+		Str("target", m.GetTarget()).
+		Str("username", user).
+		Str("password", password).
+		Msg("Trying:")
 
 	zlog.Trace().Bytes("command", command).Str("password", password).Msg("Sending password")
 

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nimda/router-brute/internal/interfaces"
@@ -20,6 +21,7 @@ import (
 // This uses HTTP/HTTPS with Basic Authentication instead of the binary API
 type MikrotikV7RestModule struct {
 	*modules.BaseRouterModule
+	mu         sync.Mutex // Protects authentication operations
 	httpClient *http.Client
 	baseURL    string
 	useHTTPS   bool
@@ -117,6 +119,10 @@ func (m *MikrotikV7RestModule) Close() error {
 
 // Authenticate attempts to authenticate with the given password using RouterOS v7 REST API
 func (m *MikrotikV7RestModule) Authenticate(ctx context.Context, password string) (bool, error) {
+	// Lock to prevent concurrent authentication attempts from racing on connection
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// Validate context
 	if ctx == nil {
 		return false, errors.New("nil context received in Authenticate()")

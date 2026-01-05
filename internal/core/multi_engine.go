@@ -130,6 +130,27 @@ func (mte *MultiTargetEngine) processTarget(target *Target, semaphore chan struc
 		return
 	}
 
+	// Pre-flight connection check to fail fast on unreachable targets
+	zlog.Debug().Str("target", target.IP).Msg("Testing connection to target...")
+	testCtx, testCancel := context.WithTimeout(mte.ctx, 10*time.Second)
+	if err := module.Connect(testCtx); err != nil {
+		testCancel()
+		zlog.Error().
+			Str("target", target.IP).
+			Int("port", target.Port).
+			Err(err).
+			Msg("Failed to connect to target")
+		mte.errorsChan <- MultiTargetError{Target: target, Error: err}
+		return
+	}
+	testCancel()
+	zlog.Info().Str("target", target.IP).Int("port", target.Port).Msg("Connection test successful")
+
+	// Close test connection - workers will reconnect
+	if err := module.Close(); err != nil {
+		zlog.Debug().Str("target", target.IP).Err(err).Msg("Error closing test connection")
+	}
+
 	// Create engine for this target
 	engine := NewEngine(mte.workersPerTarget, mte.rateLimit)
 	engine.SetModule(module)

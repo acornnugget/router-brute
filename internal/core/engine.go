@@ -130,6 +130,12 @@ func (e *Engine) StartWithContext(ctx context.Context) {
 		e.wg.Add(1)
 		go e.worker(i)
 	}
+
+	// Auto-close channels when all workers complete
+	go func() {
+		e.wg.Wait()
+		e.closeChannels()
+	}()
 }
 
 // worker handles individual authentication attempts
