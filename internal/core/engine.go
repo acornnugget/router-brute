@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nimda/router-brute/internal/interfaces"
+	zlog "github.com/rs/zerolog/log"
 )
 
 // Engine represents the core brute-forcing engine
@@ -156,7 +157,9 @@ func (e *Engine) Stop() {
 
 	// Close the module connection
 	if e.module != nil {
-		e.module.Close()
+		if err := e.module.Close(); err != nil {
+			zlog.Trace().Err(err).Msg("Error closing module connection")
+		}
 	}
 
 	close(e.results)

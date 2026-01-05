@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/nimda/router-brute/internal/modules/mikrotik/v6"
 	"github.com/nimda/router-brute/internal/modules/mikrotik/v7"
 	"github.com/nimda/router-brute/internal/modules/mikrotik/v7/rest"
+	"github.com/rs/zerolog"
 	zlog "github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
@@ -67,8 +69,12 @@ func init() {
 	mikrotikV6Cmd.Flags().Int("port", 8728, "Router API port")
 	mikrotikV6Cmd.Flags().String("timeout", "10s", "Connection timeout")
 
-	mikrotikV6Cmd.MarkFlagRequired("target")
-	mikrotikV6Cmd.MarkFlagRequired("wordlist")
+	if err := mikrotikV6Cmd.MarkFlagRequired("target"); err != nil {
+		log.Fatalf("Failed to mark target flag as required: %v", err)
+	}
+	if err := mikrotikV6Cmd.MarkFlagRequired("wordlist"); err != nil {
+		log.Fatalf("Failed to mark wordlist flag as required: %v", err)
+	}
 
 	// mikrotik-v7 flags
 	mikrotikV7Cmd.Flags().String("target", "", "Router IP address or hostname")
@@ -79,8 +85,12 @@ func init() {
 	mikrotikV7Cmd.Flags().Int("port", 8729, "Router API port (default: 8729)")
 	mikrotikV7Cmd.Flags().String("timeout", "10s", "Connection timeout")
 
-	mikrotikV7Cmd.MarkFlagRequired("target")
-	mikrotikV7Cmd.MarkFlagRequired("wordlist")
+	if err := mikrotikV7Cmd.MarkFlagRequired("target"); err != nil {
+		log.Fatalf("Failed to mark target flag as required: %v", err)
+	}
+	if err := mikrotikV7Cmd.MarkFlagRequired("wordlist"); err != nil {
+		log.Fatalf("Failed to mark wordlist flag as required: %v", err)
+	}
 
 	// mikrotik-v7-rest flags
 	mikrotikV7RestCmd.Flags().String("target", "", "Router IP address or hostname")
@@ -92,8 +102,12 @@ func init() {
 	mikrotikV7RestCmd.Flags().Bool("https", false, "Use HTTPS instead of HTTP")
 	mikrotikV7RestCmd.Flags().String("timeout", "10s", "Connection timeout")
 
-	mikrotikV7RestCmd.MarkFlagRequired("target")
-	mikrotikV7RestCmd.MarkFlagRequired("wordlist")
+	if err := mikrotikV7RestCmd.MarkFlagRequired("target"); err != nil {
+		log.Fatalf("Failed to mark target flag as required: %v", err)
+	}
+	if err := mikrotikV7RestCmd.MarkFlagRequired("wordlist"); err != nil {
+		log.Fatalf("Failed to mark wordlist flag as required: %v", err)
+	}
 
 	rootCmd.AddCommand(mikrotikV6Cmd)
 	rootCmd.AddCommand(mikrotikV7Cmd)
@@ -152,10 +166,12 @@ func runMikrotikV6(cmd *cobra.Command, args []string) {
 
 	zlog.Debug().Msg("Creating Mikrotik v6 module")
 	module := v6.NewMikrotikV6Module()
-	module.Initialize(target, user, map[string]interface{}{
+	if err := module.Initialize(target, user, map[string]interface{}{
 		"port":    port,
 		"timeout": timeoutDuration,
-	})
+	}); err != nil {
+		zlog.Fatal().Err(err).Msg("Failed to initialize Mikrotik v6 module")
+	}
 
 	zlog.Debug().Int("workers", workers).Dur("ratelimit", rateDuration).Msg("Creating engine")
 	engine := core.NewEngine(workers, rateDuration)
@@ -262,10 +278,12 @@ func runMikrotikV7(cmd *cobra.Command, args []string) {
 
 	zlog.Debug().Msg("Creating Mikrotik v7 module")
 	module := v7.NewMikrotikV7Module()
-	module.Initialize(target, user, map[string]interface{}{
+	if err := module.Initialize(target, user, map[string]interface{}{
 		"port":    port,
 		"timeout": timeoutDuration,
-	})
+	}); err != nil {
+		zlog.Fatal().Err(err).Msg("Failed to initialize Mikrotik v7 module")
+	}
 
 	zlog.Debug().Int("workers", workers).Dur("ratelimit", rateDuration).Msg("Creating engine")
 	engine := core.NewEngine(workers, rateDuration)
@@ -374,11 +392,13 @@ func runMikrotikV7Rest(cmd *cobra.Command, args []string) {
 
 	zlog.Debug().Msg("Creating Mikrotik v7 REST module")
 	module := rest.NewMikrotikV7RestModule()
-	module.Initialize(target, user, map[string]interface{}{
+	if err := module.Initialize(target, user, map[string]interface{}{
 		"port":    port,
 		"https":   useHTTPS,
 		"timeout": timeoutDuration,
-	})
+	}); err != nil {
+		zlog.Fatal().Err(err).Msg("Failed to initialize Mikrotik v7 REST module")
+	}
 
 	zlog.Debug().Int("workers", workers).Dur("ratelimit", rateDuration).Msg("Creating engine")
 	engine := core.NewEngine(workers, rateDuration)

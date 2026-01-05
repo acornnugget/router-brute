@@ -35,13 +35,13 @@ func TestMikrotikV7ModuleCreation(t *testing.T) {
 		t.Errorf("Expected username 'admin', got '%s'", module.GetUsername())
 	}
 
-	// Test that connection fails (expected since we don't have a real router)
+	// Test that connection succeeds for WebFig (it doesn't actually connect until first request)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	err = module.Connect(ctx)
-	if err == nil {
-		t.Error("Expected connection to fail (no real router), but it succeeded")
+	if err != nil {
+		t.Errorf("Expected WebFig connection to succeed, but got error: %v", err)
 	}
 
 	t.Logf("MikrotikV7Module creation test completed successfully")
@@ -66,7 +66,7 @@ func TestMikrotikV7ProtocolEncoding(t *testing.T) {
 	}
 
 	// Test word decoding
-	decodedWords, err := module.decodeWords(buf)
+	decodedWords, err := module.decodeWordsV7(buf)
 	if err != nil {
 		t.Fatalf("Failed to decode words: %v", err)
 	}

@@ -127,7 +127,9 @@ func (m *MikrotikV7RestModule) Authenticate(ctx context.Context, password string
 	// Always disconnect and reconnect for each attempt to avoid session issues
 	if m.IsConnected() {
 		zlog.Trace().Msg("Closing existing connection for fresh authentication attempt")
-		m.Close()
+		if err := m.Close(); err != nil {
+			zlog.Trace().Err(err).Msg("Error closing v7 REST connection during reauthentication")
+		}
 	}
 
 	if err := m.Connect(ctx); err != nil {
@@ -162,7 +164,11 @@ func (m *MikrotikV7RestModule) Authenticate(ctx context.Context, password string
 		}
 		return false, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			zlog.Trace().Err(err).Msg("Error closing REST response body")
+		}
+	}()
 
 	zlog.Trace().Int("status_code", resp.StatusCode).Msg("Received RouterOS v7 REST API response")
 

@@ -125,7 +125,9 @@ func (m *MikrotikV7Module) Connect(ctx context.Context) error {
 	// Set read/write deadlines
 	if err := m.conn.SetDeadline(time.Now().Add(m.timeout)); err != nil {
 		zlog.Trace().Err(err).Msg("Failed to set connection deadline")
-		m.conn.Close()
+		if err := m.conn.Close(); err != nil {
+			zlog.Trace().Err(err).Msg("Error closing v7 connection after deadline failure")
+		}
 		m.SetConnected(false)
 		return err
 	}
@@ -143,7 +145,9 @@ func (m *MikrotikV7Module) Close() error {
 	}
 
 	if m.conn != nil {
-		m.conn.Close()
+		if err := m.conn.Close(); err != nil {
+			zlog.Trace().Err(err).Msg("Error closing v7 connection")
+		}
 	}
 	m.SetConnected(false)
 	m.conn = nil
@@ -165,7 +169,9 @@ func (m *MikrotikV7Module) Authenticate(ctx context.Context, password string) (b
 	// Always disconnect and reconnect for each attempt to avoid session issues
 	if m.IsConnected() {
 		zlog.Trace().Msg("Closing existing connection for fresh authentication attempt")
-		m.Close()
+		if err := m.Close(); err != nil {
+			zlog.Trace().Err(err).Msg("Error closing v7 connection during reauthentication")
+		}
 	}
 
 	if err := m.Connect(ctx); err != nil {

@@ -48,7 +48,7 @@ func TestMikrotikV6ModuleCreation(t *testing.T) {
 }
 
 func TestMikrotikV6ProtocolEncoding(t *testing.T) {
-	module := NewMikrotikV6Module("")
+	module := NewMikrotikV6Module()
 
 	// Test sentence encoding
 	sentence := []string{"/login", "=name=admin", "=password=test123"}

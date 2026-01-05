@@ -29,10 +29,8 @@ func (b *BaseRouterModule) Initialize(target, username string, options map[strin
 	b.username = username
 
 	// Merge options
-	if options != nil {
-		for k, v := range options {
-			b.options[k] = v
-		}
+	for k, v := range options {
+		b.options[k] = v
 	}
 
 	return nil

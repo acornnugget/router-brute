@@ -84,7 +84,9 @@ func (m *MikrotikV6Module) Connect(ctx context.Context) error {
 
 	// Set read/write deadlines
 	if err := m.conn.SetDeadline(time.Now().Add(m.timeout)); err != nil {
-		m.conn.Close()
+		if err := m.conn.Close(); err != nil {
+			zlog.Trace().Err(err).Msg("Error closing v6 connection after deadline failure")
+		}
 		m.SetConnected(false)
 		return err
 	}
@@ -99,7 +101,9 @@ func (m *MikrotikV6Module) Close() error {
 	}
 
 	if m.conn != nil {
-		m.conn.Close()
+		if err := m.conn.Close(); err != nil {
+			zlog.Trace().Err(err).Msg("Error closing v6 connection")
+		}
 	}
 	m.SetConnected(false)
 	m.conn = nil
@@ -115,7 +119,9 @@ func (m *MikrotikV6Module) Authenticate(ctx context.Context, password string) (b
 
 	// Always disconnect and reconnect for each attempt to avoid session issues
 	if m.IsConnected() {
-		m.Close()
+		if err := m.Close(); err != nil {
+			zlog.Trace().Err(err).Msg("Error closing v6 connection during reauthentication")
+		}
 	}
 
 	if err := m.Connect(ctx); err != nil {
@@ -141,7 +147,7 @@ func (m *MikrotikV6Module) sendLogin(user string, password string) error {
 	if m.conn == nil {
 		return errors.New("not connected")
 	}
-	command := buildLoginCommand("admin", password)
+	command := buildLoginCommand(user, password)
 	zlog.Debug().Str("password", password).Msg("Trying:")
 
 	zlog.Trace().Bytes("command", command).Str("password", password).Msg("Sending password")
