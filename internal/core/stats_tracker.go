@@ -10,20 +10,20 @@ import (
 
 // StatsTracker tracks attack statistics and outputs progress reports
 type StatsTracker struct {
-	mu                  sync.RWMutex
-	startTime           time.Time
-	totalPasswords      int
-	totalTargets        int
-	passwordsTried      int
-	targetsCompleted    int
-	targetsAlive        int // Non-dead targets
-	outputInterval      time.Duration
-	stopChan            chan struct{}
-	wg                  sync.WaitGroup
-	progressTracker     *ProgressTracker
-	lastPasswordsTried  int
-	lastReportTime      time.Time
-	currentSpeed        float64 // passwords per second
+	mu               sync.RWMutex
+	startTime        time.Time
+	totalPasswords   int
+	totalTargets     int
+	passwordsTried   int
+	targetsCompleted int
+	targetsAlive     int // Non-dead targets
+	outputInterval   time.Duration
+	stopChan         chan struct{}
+	wg               sync.WaitGroup
+	progressTracker  *ProgressTracker
+	// lastPasswordsTried  int
+	lastReportTime time.Time
+	currentSpeed   float64 // passwords per second
 }
 
 // NewStatsTracker creates a new statistics tracker
@@ -147,23 +147,23 @@ func (st *StatsTracker) outputProgress() {
 		timeLeft = time.Duration(float64(remainingAttempts)/st.currentSpeed) * time.Second
 	}
 
-	// Output to STDERR
-	fmt.Fprintf(os.Stderr, "\n=== Progress Report ===\n")
-	fmt.Fprintf(os.Stderr, "Speed:                %.1f passwords/minute (%.2f passwords/second)\n", speedPerMinute, st.currentSpeed)
-	fmt.Fprintf(os.Stderr, "Targets:              %d/%d completed (%d alive, %d dead)\n",
+	// Output to STDERR, ignore any errors
+	_, _ = fmt.Fprintf(os.Stderr, "\n=== Progress Report ===\n")
+	_, _ = fmt.Fprintf(os.Stderr, "Speed:                %.1f passwords/minute (%.2f passwords/second)\n", speedPerMinute, st.currentSpeed)
+	_, _ = fmt.Fprintf(os.Stderr, "Targets:              %d/%d completed (%d alive, %d dead)\n",
 		targetsCompleted, totalTargets, targetsAlive, totalTargets-targetsAlive)
-	fmt.Fprintf(os.Stderr, "Passwords tried:      %d\n", passwordsTried)
-	fmt.Fprintf(os.Stderr, "Elapsed:              %s\n", formatDuration(elapsed))
+	_, _ = fmt.Fprintf(os.Stderr, "Passwords tried:      %d\n", passwordsTried)
+	_, _ = fmt.Fprintf(os.Stderr, "Elapsed:              %s\n", formatDuration(elapsed))
 
 	if totalEstimatedTime > 0 {
-		fmt.Fprintf(os.Stderr, "Total estimated:      %s (all targets, all passwords)\n", formatDuration(totalEstimatedTime))
+		_, _ = fmt.Fprintf(os.Stderr, "Total estimated:      %s (all targets, all passwords)\n", formatDuration(totalEstimatedTime))
 	}
 
 	if timeLeft > 0 {
-		fmt.Fprintf(os.Stderr, "Estimated time left:  %s (remaining targets)\n", formatDuration(timeLeft))
+		_, _ = fmt.Fprintf(os.Stderr, "Estimated time left:  %s (remaining targets)\n", formatDuration(timeLeft))
 	}
 
-	fmt.Fprintf(os.Stderr, "======================\n\n")
+	_, _ = fmt.Fprintf(os.Stderr, "======================\n\n")
 }
 
 // formatDuration formats a duration in a human-readable format
