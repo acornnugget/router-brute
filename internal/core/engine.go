@@ -13,23 +13,23 @@ import (
 
 // Engine represents the core brute-forcing engine
 type Engine struct {
-	workers              int
-	rateLimit            time.Duration
-	passwordQueue        *PasswordQueue
-	results              chan Result
-	errors               chan error
-	ctx                  context.Context
-	cancelFunc           context.CancelFunc
-	wg                   sync.WaitGroup
-	startTime            time.Time
-	module               interfaces.RouterModule
-	closed               bool
-	closeMu              sync.Mutex
-	maxTimeout           time.Duration // Maximum timeout for adaptive timeout
-	maxConsecErrors      int           // Maximum consecutive errors before giving up
-	currentTimeout       time.Duration // Current adaptive timeout
-	consecutiveErrors    int           // Counter for consecutive errors
-	consecutiveErrorsMu  sync.Mutex    // Protects consecutive error counter
+	workers             int
+	rateLimit           time.Duration
+	passwordQueue       *PasswordQueue
+	results             chan Result
+	errors              chan error
+	ctx                 context.Context
+	cancelFunc          context.CancelFunc
+	wg                  sync.WaitGroup
+	startTime           time.Time
+	module              interfaces.RouterModule
+	closed              bool
+	closeMu             sync.Mutex
+	maxTimeout          time.Duration // Maximum timeout for adaptive timeout
+	maxConsecErrors     int           // Maximum consecutive errors before giving up
+	currentTimeout      time.Duration // Current adaptive timeout
+	consecutiveErrors   int           // Counter for consecutive errors
+	consecutiveErrorsMu sync.Mutex    // Protects consecutive error counter
 }
 
 // GetResults returns the channel for receiving authentication results
@@ -71,8 +71,8 @@ func NewEngine(workers int, rateLimit time.Duration) *Engine {
 		ctx:             ctx,
 		cancelFunc:      cancel,
 		maxTimeout:      30 * time.Second, // Default max timeout
-		maxConsecErrors: 5,                 // Default max consecutive errors
-		currentTimeout:  10 * time.Second,  // Default initial timeout
+		maxConsecErrors: 5,                // Default max consecutive errors
+		currentTimeout:  10 * time.Second, // Default initial timeout
 	}
 }
 

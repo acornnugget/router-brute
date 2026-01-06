@@ -4,7 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/nimda/router-brute/internal/interfaces"
@@ -108,6 +112,7 @@ func init() {
 	rootCmd.PersistentFlags().Int("max-conseq-err-per-host", 5, "Maximum consecutive errors before marking host as dead")
 	rootCmd.PersistentFlags().String("target-file", "", "File containing target specifications (multi-target mode)")
 	rootCmd.PersistentFlags().Int("concurrent-targets", 1, "Number of targets to attack simultaneously")
+	rootCmd.PersistentFlags().String("output-progress", "5s", "Progress statistics output interval (0 to disable)")
 
 	// Resume functionality flags (shared by all protocols)
 	rootCmd.PersistentFlags().String("resume", "", "Resume from a previous session (path to resume file)")
@@ -143,9 +148,14 @@ type AttackConfig struct {
 	multiFactory      interfaces.ModuleFactory
 
 	// Resume functionality
-	resumeFile           string
-	saveProgressInterval time.Duration
-	saveDir              string
+	resumeFile              string
+	saveProgressInterval    time.Duration
+	saveDir                 string
+	outputProgressInterval  time.Duration
+
+	// Error handling
+	maxTimeout      time.Duration
+	maxConsecErrors int
 }
 
 // parseAttackConfig parses attack configuration from command flags
@@ -162,6 +172,9 @@ func parseAttackConfig(cmd *cobra.Command) *AttackConfig {
 	resumeFile, _ := cmd.Flags().GetString("resume")
 	saveProgress, _ := cmd.Flags().GetString("save-progress")
 	saveDir, _ := cmd.Flags().GetString("save-dir")
+	outputProgress, _ := cmd.Flags().GetString("output-progress")
+	maxTimeout, _ := cmd.Flags().GetString("max-timeout")
+	maxConsecErrors, _ := cmd.Flags().GetInt("max-conseq-err-per-host")
 
 	rateDuration, err := time.ParseDuration(rateLimit)
 	if err != nil {
@@ -173,6 +186,11 @@ func parseAttackConfig(cmd *cobra.Command) *AttackConfig {
 		zlog.Fatal().Err(err).Msg("Invalid timeout")
 	}
 
+	maxTimeoutDuration, err := time.ParseDuration(maxTimeout)
+	if err != nil {
+		zlog.Fatal().Err(err).Msg("Invalid max-timeout")
+	}
+
 	var saveProgressInterval time.Duration
 	if saveProgress != "" && saveProgress != "0" && saveProgress != "0s" {
 		saveProgressInterval, err = time.ParseDuration(saveProgress)
@@ -181,19 +199,30 @@ func parseAttackConfig(cmd *cobra.Command) *AttackConfig {
 		}
 	}
 
+	var outputProgressInterval time.Duration
+	if outputProgress != "" && outputProgress != "0" && outputProgress != "0s" {
+		outputProgressInterval, err = time.ParseDuration(outputProgress)
+		if err != nil {
+			zlog.Fatal().Err(err).Msg("Invalid output-progress interval")
+		}
+	}
+
 	return &AttackConfig{
-		target:               target,
-		user:                 user,
-		wordlist:             wordlist,
-		workers:              workers,
-		port:                 port,
-		timeout:              timeoutDuration,
-		rateLimit:            rateDuration,
-		targetFile:           targetFile,
-		concurrentTargets:    concurrentTargets,
-		resumeFile:           resumeFile,
-		saveProgressInterval: saveProgressInterval,
-		saveDir:              saveDir,
+		target:                 target,
+		user:                   user,
+		wordlist:               wordlist,
+		workers:                workers,
+		port:                   port,
+		timeout:                timeoutDuration,
+		rateLimit:              rateDuration,
+		targetFile:             targetFile,
+		concurrentTargets:      concurrentTargets,
+		resumeFile:             resumeFile,
+		saveProgressInterval:   saveProgressInterval,
+		saveDir:                saveDir,
+		outputProgressInterval: outputProgressInterval,
+		maxTimeout:             maxTimeoutDuration,
+		maxConsecErrors:        maxConsecErrors,
 	}
 }
 
@@ -420,14 +449,78 @@ func runMultiTarget(cfg *AttackConfig) {
 	engine.LoadTargets(targets)
 	engine.LoadPasswords(passwords)
 
+	// Configure timeouts and error handling
+	engine.SetTimeouts(cfg.timeout, cfg.maxTimeout)
+	engine.SetMaxConsecutiveErrors(cfg.maxConsecErrors)
+
 	// Set progress tracker if enabled
 	if tracker != nil {
 		engine.SetProgressTracker(tracker)
 	}
 
+	// Create statistics tracker
+	var statsTracker *core.StatsTracker
+	if cfg.outputProgressInterval > 0 {
+		statsTracker = core.NewStatsTracker(len(passwords), len(targets), cfg.outputProgressInterval, tracker)
+		zlog.Info().
+			Dur("interval", cfg.outputProgressInterval).
+			Msg("Progress statistics output enabled")
+	}
+
 	// Start attack
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Setup signal handler for Ctrl-C
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		zlog.Info().Msg("Interrupt signal received, stopping attack...")
+		cancel()
+
+		// Stop trackers
+		if statsTracker != nil {
+			statsTracker.Stop()
+		}
+		if tracker != nil {
+			tracker.Stop()
+			// Save current state
+			if err := tracker.SaveNow(); err != nil {
+				zlog.Error().Err(err).Msg("Failed to save progress on interrupt")
+			}
+		}
+
+		// Generate resume command
+		if tracker != nil {
+			state := tracker.GetState()
+			if state != nil {
+				// Find most recent resume file
+				resumeFile := filepath.Join(cfg.saveDir, fmt.Sprintf("resume_%s_%s.json",
+					state.Protocol,
+					time.Now().Format("20060102_150405")))
+
+				// Save final state
+				savedPath, err := core.SaveResumeState(state, cfg.saveDir)
+				if err == nil {
+					resumeFile = savedPath
+				}
+
+				// Build resume command
+				resumeCmd := buildResumeCommand(state.Protocol, resumeFile, cfg)
+
+				// Output TEXTUAL message to STDERR
+				fmt.Fprintf(os.Stderr, "\n\n")
+				fmt.Fprintf(os.Stderr, "========================================\n")
+				fmt.Fprintf(os.Stderr, "Attack interrupted. To resume, run:\n")
+				fmt.Fprintf(os.Stderr, "========================================\n")
+				fmt.Fprintf(os.Stderr, "%s\n", resumeCmd)
+				fmt.Fprintf(os.Stderr, "========================================\n\n")
+			}
+		}
+
+		os.Exit(0)
+	}()
 
 	// Start progress tracker
 	if tracker != nil {
@@ -435,30 +528,83 @@ func runMultiTarget(cfg *AttackConfig) {
 		defer tracker.Stop()
 	}
 
+	// Start statistics tracker
+	if statsTracker != nil {
+		statsTracker.Start(ctx)
+		defer statsTracker.Stop()
+	}
+
 	engine.Start(ctx)
 
-	// Process results
+	// Process results and errors concurrently
+	var wg sync.WaitGroup
 	successCount := 0
-	for result := range engine.GetResults() {
-		if result.Success {
-			successCount++
-			zlog.Info().
-				Str("target", result.Target.IP).
-				Str("username", result.Target.Username).
-				Str("password", result.SuccessPassword).
-				Msg("✓ Found valid credentials")
+	totalAttempts := 0
+	targetsCompleted := 0
+	errorCount := 0
+	var statsLock sync.Mutex
+
+	// Process results
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for result := range engine.GetResults() {
+			statsLock.Lock()
+			totalAttempts += result.Attempts
+			targetsCompleted++
+
+			// Calculate alive targets (non-dead)
+			targetsAlive := len(targets)
+			if tracker != nil {
+				state := tracker.GetState()
+				if state != nil {
+					deadCount := 0
+					for _, tp := range state.Targets {
+						if tp.Dead {
+							deadCount++
+						}
+					}
+					targetsAlive = len(targets) - deadCount
+				}
+			}
+
+			// Update statistics tracker
+			if statsTracker != nil {
+				statsTracker.UpdateProgress(totalAttempts, targetsCompleted, targetsAlive)
+			}
+
+			if result.Success {
+				successCount++
+			}
+			statsLock.Unlock()
+
+			if result.Success {
+				zlog.Info().
+					Str("target", result.Target.IP).
+					Str("username", result.Target.Username).
+					Str("password", result.SuccessPassword).
+					Msg("✓ Found valid credentials")
+			}
 		}
-	}
+	}()
 
 	// Process errors
-	errorCount := 0
-	for err := range engine.GetErrors() {
-		zlog.Error().
-			Str("target", err.Target.IP).
-			Err(err.Error).
-			Msg("Error during attack")
-		errorCount++
-	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for err := range engine.GetErrors() {
+			zlog.Error().
+				Str("target", err.Target.IP).
+				Err(err.Error).
+				Msg("Error during attack")
+			statsLock.Lock()
+			errorCount++
+			statsLock.Unlock()
+		}
+	}()
+
+	// Wait for all processing to complete
+	wg.Wait()
 
 	zlog.Info().
 		Int("total_targets", len(targets)).
@@ -469,6 +615,66 @@ func runMultiTarget(cfg *AttackConfig) {
 	if successCount == 0 {
 		zlog.Info().Msg("No valid credentials found in any target")
 	}
+}
+
+// buildResumeCommand builds a command line string to resume the attack
+func buildResumeCommand(protocol, resumeFile string, cfg *AttackConfig) string {
+	var cmd strings.Builder
+	cmd.WriteString("./router-brute ")
+
+	// Map protocol name to command
+	switch protocol {
+	case "mikrotik-v6":
+		cmd.WriteString("mikrotik-v6")
+	case "mikrotik-v7":
+		cmd.WriteString("mikrotik-v7")
+	case "mikrotik-v7-rest":
+		cmd.WriteString("mikrotik-v7-rest")
+	default:
+		cmd.WriteString(protocol)
+	}
+
+	// Add resume flag
+	cmd.WriteString(" --resume=\"")
+	cmd.WriteString(resumeFile)
+	cmd.WriteString("\"")
+
+	// Add other flags if they differ from defaults
+	if cfg.workers != 5 {
+		cmd.WriteString(fmt.Sprintf(" --workers=%d", cfg.workers))
+	}
+	if cfg.rateLimit != 100*time.Millisecond {
+		cmd.WriteString(fmt.Sprintf(" --rate=%s", cfg.rateLimit.String()))
+	}
+	if cfg.timeout != 5*time.Second {
+		cmd.WriteString(fmt.Sprintf(" --timeout=%s", cfg.timeout.String()))
+	}
+	if cfg.maxTimeout != 15*time.Second {
+		cmd.WriteString(fmt.Sprintf(" --max-timeout=%s", cfg.maxTimeout.String()))
+	}
+	if cfg.maxConsecErrors != 5 {
+		cmd.WriteString(fmt.Sprintf(" --max-conseq-err-per-host=%d", cfg.maxConsecErrors))
+	}
+	if cfg.concurrentTargets != 1 {
+		cmd.WriteString(fmt.Sprintf(" --concurrent-targets=%d", cfg.concurrentTargets))
+	}
+	if cfg.saveProgressInterval > 0 {
+		cmd.WriteString(fmt.Sprintf(" --save-progress=%s", cfg.saveProgressInterval.String()))
+	}
+	if cfg.outputProgressInterval > 0 {
+		cmd.WriteString(fmt.Sprintf(" --output-progress=%s", cfg.outputProgressInterval.String()))
+	}
+	if cfg.saveDir != "./resume" {
+		cmd.WriteString(fmt.Sprintf(" --save-dir=%s", cfg.saveDir))
+	}
+	if debugMode {
+		cmd.WriteString(" --debug")
+	}
+	if traceMode {
+		cmd.WriteString(" --trace")
+	}
+
+	return cmd.String()
 }
 
 func main() {
