@@ -153,12 +153,37 @@ func (m *MikrotikV6Module) Authenticate(ctx context.Context, password string) (b
 
 	// Send the command
 	if err := m.sendLogin(m.GetUsername(), password); err != nil {
+		// Check if this is a connection error (broken pipe, connection reset, EOF, etc.)
+		errStr := err.Error()
+		if strings.Contains(errStr, "broken pipe") ||
+			strings.Contains(errStr, "connection reset") ||
+			strings.Contains(errStr, "EOF") ||
+			strings.Contains(errStr, "i/o timeout") ||
+			strings.Contains(errStr, "connection refused") {
+			// Connection is dead - close it and reset counter
+			zlog.Debug().
+				Str("target", m.GetTarget()).
+				Err(err).
+				Msg("Connection error detected, forcing reconnection")
+			if closeErr := m.Close(); closeErr != nil {
+				zlog.Trace().Err(closeErr).Msg("Error closing dead connection")
+			}
+			m.attemptsOnConn = 0
+			return false, err
+		}
+
 		// Check if this is an authentication failure
-		if strings.Contains(err.Error(), "invalid user name or password") ||
-			strings.Contains(err.Error(), "!trap") ||
-			strings.Contains(err.Error(), "!fatal") {
+		if strings.Contains(errStr, "invalid user name or password") ||
+			strings.Contains(errStr, "!trap") ||
+			strings.Contains(errStr, "!fatal") {
 			return false, nil
 		}
+
+		// Unknown error - close connection to be safe
+		if closeErr := m.Close(); closeErr != nil {
+			zlog.Trace().Err(closeErr).Msg("Error closing connection after unknown error")
+		}
+		m.attemptsOnConn = 0
 		return false, err
 	}
 

@@ -256,14 +256,39 @@ func (m *MikrotikV7Module) authenticateBinary(ctx context.Context, password stri
 	// Send the login command using RouterOS v7 protocol
 	zlog.Trace().Str("username", m.GetUsername()).Msg("Sending RouterOS v7 login command")
 	if err := m.sendLoginV7(m.GetUsername(), password); err != nil {
+		// Check if this is a connection error (broken pipe, connection reset, EOF, etc.)
+		errStr := err.Error()
+		if strings.Contains(errStr, "broken pipe") ||
+			strings.Contains(errStr, "connection reset") ||
+			strings.Contains(errStr, "EOF") ||
+			strings.Contains(errStr, "i/o timeout") ||
+			strings.Contains(errStr, "connection refused") {
+			// Connection is dead - close it and reset counter
+			zlog.Debug().
+				Str("target", m.GetTarget()).
+				Err(err).
+				Msg("Connection error detected, forcing reconnection")
+			if closeErr := m.Close(); closeErr != nil {
+				zlog.Trace().Err(closeErr).Msg("Error closing dead connection")
+			}
+			m.attemptsOnConn = 0
+			return false, err
+		}
+
 		// Check if this is an authentication failure
-		if strings.Contains(err.Error(), "invalid user name or password") ||
-			strings.Contains(err.Error(), "!trap") ||
-			strings.Contains(err.Error(), "!fatal") {
+		if strings.Contains(errStr, "invalid user name or password") ||
+			strings.Contains(errStr, "!trap") ||
+			strings.Contains(errStr, "!fatal") {
 			zlog.Trace().Err(err).Msg("Authentication failed (expected)")
 			return false, nil
 		}
+
+		// Unknown error - close connection to be safe
 		zlog.Trace().Err(err).Msg("Authentication failed with unexpected error")
+		if closeErr := m.Close(); closeErr != nil {
+			zlog.Trace().Err(closeErr).Msg("Error closing connection after unknown error")
+		}
+		m.attemptsOnConn = 0
 		return false, err
 	}
 
