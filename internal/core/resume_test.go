@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -204,8 +205,16 @@ func TestProgressTrackerSaveLoad(t *testing.T) {
 	// Create progress tracker with short interval for testing
 	tracker := NewProgressTracker(state, tmpDir, 100*time.Millisecond, true)
 
+	// Start the progress tracker to enable async update processing
+	ctx := context.Background()
+	tracker.Start(ctx)
+	defer tracker.Stop()
+
 	// Update progress
 	tracker.UpdateTargetProgress("192.168.1.1", 8728, 50, false, false, "")
+
+	// Wait briefly for async update to be processed
+	time.Sleep(50 * time.Millisecond)
 
 	// Save immediately
 	err = tracker.SaveNow()
