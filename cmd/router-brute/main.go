@@ -135,9 +135,9 @@ type AttackConfig struct {
 	multiFactory      interfaces.ModuleFactory
 
 	// Resume functionality
-	resumeFile       string
+	resumeFile           string
 	saveProgressInterval time.Duration
-	saveDir          string
+	saveDir              string
 }
 
 // parseAttackConfig parses attack configuration from command flags
@@ -174,18 +174,18 @@ func parseAttackConfig(cmd *cobra.Command) *AttackConfig {
 	}
 
 	return &AttackConfig{
-		target:            target,
-		user:              user,
-		wordlist:          wordlist,
-		workers:           workers,
-		port:              port,
-		timeout:           timeoutDuration,
-		rateLimit:         rateDuration,
-		targetFile:        targetFile,
-		concurrentTargets: concurrentTargets,
-		resumeFile:        resumeFile,
+		target:               target,
+		user:                 user,
+		wordlist:             wordlist,
+		workers:              workers,
+		port:                 port,
+		timeout:              timeoutDuration,
+		rateLimit:            rateDuration,
+		targetFile:           targetFile,
+		concurrentTargets:    concurrentTargets,
+		resumeFile:           resumeFile,
 		saveProgressInterval: saveProgressInterval,
-		saveDir:           saveDir,
+		saveDir:              saveDir,
 	}
 }
 

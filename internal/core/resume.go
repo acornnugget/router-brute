@@ -12,14 +12,14 @@ import (
 
 // ResumeState represents the complete state of an attack that can be saved and resumed
 type ResumeState struct {
-	Timestamp    time.Time          `json:"timestamp"`
-	Protocol     string             `json:"protocol"`
-	Username     string             `json:"username"`
-	PasswordFile string             `json:"password_file"`
-	TargetFile   string             `json:"target_file,omitempty"` // For multi-target mode
-	Workers      int                `json:"workers"`
-	RateLimit    string             `json:"rate_limit"`
-	Targets      []TargetProgress   `json:"targets"`
+	Timestamp    time.Time              `json:"timestamp"`
+	Protocol     string                 `json:"protocol"`
+	Username     string                 `json:"username"`
+	PasswordFile string                 `json:"password_file"`
+	TargetFile   string                 `json:"target_file,omitempty"` // For multi-target mode
+	Workers      int                    `json:"workers"`
+	RateLimit    string                 `json:"rate_limit"`
+	Targets      []TargetProgress       `json:"targets"`
 	Options      map[string]interface{} `json:"options,omitempty"`
 }
 
@@ -28,9 +28,9 @@ type TargetProgress struct {
 	IP             string `json:"ip"`
 	Port           int    `json:"port"`
 	Username       string `json:"username"`
-	PasswordsTried int    `json:"passwords_tried"` // Number of passwords attempted
-	Completed      bool   `json:"completed"`       // Target finished (success or all passwords tried)
-	Success        bool   `json:"success"`         // Found valid credentials
+	PasswordsTried int    `json:"passwords_tried"`          // Number of passwords attempted
+	Completed      bool   `json:"completed"`                // Target finished (success or all passwords tried)
+	Success        bool   `json:"success"`                  // Found valid credentials
 	FoundPassword  string `json:"found_password,omitempty"` // The successful password (if any)
 }
 

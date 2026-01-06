@@ -12,15 +12,15 @@ import (
 func TestMultiTargetEngine_Simple(t *testing.T) {
 	// This test verifies that the multi-engine can process targets
 	// without getting stuck, using a very short timeout
-	
+
 	// Create a simple test that should complete quickly
 	t.Log("Starting simple multi-engine test")
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
-	
+
 	done := make(chan bool, 1)
-	
+
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -31,7 +31,7 @@ func TestMultiTargetEngine_Simple(t *testing.T) {
 			done <- false
 		}
 	}()
-	
+
 	// Wait for completion
 	select {
 	case success := <-done:
