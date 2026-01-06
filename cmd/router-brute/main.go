@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -28,7 +27,8 @@ var rootCmd = &cobra.Command{
 	Use:   "router-brute",
 	Short: "Router Brute-forcing Tool",
 	Long:  "This tool tests password strength on various router platforms.",
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Setup logging
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
 		if traceMode {
 			zerolog.SetGlobalLevel(zerolog.TraceLevel)
@@ -37,6 +37,34 @@ var rootCmd = &cobra.Command{
 			zerolog.SetGlobalLevel(zerolog.DebugLevel)
 			zlog.Debug().Msg("🔍 DEBUG MODE ENABLED")
 		}
+
+		// Validate common flags (skip for root command itself)
+		if cmd.Name() == "router-brute" {
+			return nil
+		}
+
+		target, _ := cmd.Flags().GetString("target")
+		targetFile, _ := cmd.Flags().GetString("target-file")
+		resumeFile, _ := cmd.Flags().GetString("resume")
+		wordlist, _ := cmd.Flags().GetString("wordlist")
+
+		// If resuming, target and wordlist are optional (loaded from resume file)
+		if resumeFile != "" {
+			return nil
+		}
+
+		// Normal mode validation
+		if target == "" && targetFile == "" {
+			return fmt.Errorf("either --target or --target-file must be specified")
+		}
+		if target != "" && targetFile != "" {
+			return fmt.Errorf("cannot specify both --target and --target-file")
+		}
+		if wordlist == "" {
+			return fmt.Errorf("--wordlist is required")
+		}
+
+		return nil
 	},
 }
 
@@ -59,57 +87,37 @@ var mikrotikV7RestCmd = &cobra.Command{
 }
 
 func init() {
-	// Global flags
+	// Global flags (logging)
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "Enable debug logging")
 	rootCmd.PersistentFlags().BoolVar(&traceMode, "trace", false, "Enable trace logging")
 
-	// Setup all protocol commands
-	setupProtocolCommand(mikrotikV6Cmd, 8728)
-	setupProtocolCommand(mikrotikV7Cmd, 8729)
-	setupProtocolCommand(mikrotikV7RestCmd, 80)
+	// Common attack flags (shared by all protocols)
+	rootCmd.PersistentFlags().String("target", "", "Router IP address or hostname")
+	rootCmd.PersistentFlags().String("user", "admin", "Username to test")
+	rootCmd.PersistentFlags().String("wordlist", "", "Path to password wordlist file")
+	rootCmd.PersistentFlags().Int("workers", 5, "Number of concurrent workers")
+	rootCmd.PersistentFlags().String("rate", "100ms", "Rate limit between attempts")
+	rootCmd.PersistentFlags().String("timeout", "10s", "Connection timeout")
+	rootCmd.PersistentFlags().String("target-file", "", "File containing target specifications (multi-target mode)")
+	rootCmd.PersistentFlags().Int("concurrent-targets", 1, "Number of targets to attack simultaneously")
 
-	// Additional REST-specific flag
+	// Resume functionality flags (shared by all protocols)
+	rootCmd.PersistentFlags().String("resume", "", "Resume from a previous session (path to resume file)")
+	rootCmd.PersistentFlags().String("save-progress", "30s", "Auto-save progress interval (0 to disable)")
+	rootCmd.PersistentFlags().String("save-dir", "./resume", "Directory to save resume files")
+
+	// Protocol-specific flags with different defaults
+	mikrotikV6Cmd.Flags().Int("port", 8728, "RouterOS v6 API port")
+	mikrotikV7Cmd.Flags().Int("port", 8729, "RouterOS v7 API port")
+	mikrotikV7RestCmd.Flags().Int("port", 80, "RouterOS v7 REST API port")
+
+	// Module-specific flags
 	mikrotikV7RestCmd.Flags().Bool("https", false, "Use HTTPS instead of HTTP")
 
 	// Add commands to root
 	rootCmd.AddCommand(mikrotikV6Cmd)
 	rootCmd.AddCommand(mikrotikV7Cmd)
 	rootCmd.AddCommand(mikrotikV7RestCmd)
-}
-
-// setupProtocolCommand adds common flags and marks required flags for a protocol command
-func setupProtocolCommand(cmd *cobra.Command, defaultPort int) {
-	addCommonFlags(cmd, defaultPort)
-
-	// Mark wordlist as required
-	if err := cmd.MarkFlagRequired("wordlist"); err != nil {
-		log.Fatalf("Failed to mark wordlist flag as required: %v", err)
-	}
-
-	// Add custom validation for target/target-file requirement
-	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
-		target, _ := cmd.Flags().GetString("target")
-		targetFile, _ := cmd.Flags().GetString("target-file")
-		resumeFile, _ := cmd.Flags().GetString("resume")
-		wordlist, _ := cmd.Flags().GetString("wordlist")
-
-		// If resuming, target and wordlist are optional (loaded from resume file)
-		if resumeFile != "" {
-			return nil
-		}
-
-		// Normal mode validation
-		if target == "" && targetFile == "" {
-			return fmt.Errorf("either --target or --target-file must be specified")
-		}
-		if target != "" && targetFile != "" {
-			return fmt.Errorf("cannot specify both --target and --target-file")
-		}
-		if wordlist == "" {
-			return fmt.Errorf("--wordlist is required")
-		}
-		return nil
-	}
 }
 
 // AttackConfig holds configuration for an attack
@@ -130,24 +138,6 @@ type AttackConfig struct {
 	resumeFile       string
 	saveProgressInterval time.Duration
 	saveDir          string
-}
-
-// addCommonFlags adds common flags to a command
-func addCommonFlags(cmd *cobra.Command, defaultPort int) {
-	cmd.Flags().String("target", "", "Router IP address or hostname")
-	cmd.Flags().String("user", "admin", "Username to test")
-	cmd.Flags().String("wordlist", "", "Path to password wordlist file")
-	cmd.Flags().Int("workers", 5, "Number of concurrent workers")
-	cmd.Flags().String("rate", "100ms", "Rate limit between attempts")
-	cmd.Flags().Int("port", defaultPort, "Router API port")
-	cmd.Flags().String("timeout", "10s", "Connection timeout")
-	cmd.Flags().String("target-file", "", "File containing target specifications (multi-target mode)")
-	cmd.Flags().Int("concurrent-targets", 1, "Number of targets to attack simultaneously")
-
-	// Resume functionality
-	cmd.Flags().String("resume", "", "Resume from a previous session (path to resume file)")
-	cmd.Flags().String("save-progress", "30s", "Auto-save progress interval (0 to disable)")
-	cmd.Flags().String("save-dir", "./resume", "Directory to save resume files")
 }
 
 // parseAttackConfig parses attack configuration from command flags
