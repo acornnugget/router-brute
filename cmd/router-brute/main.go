@@ -13,6 +13,7 @@ import (
 	"github.com/nimda/router-brute/internal/modules/mikrotik/v6"
 	"github.com/nimda/router-brute/internal/modules/mikrotik/v7"
 	"github.com/nimda/router-brute/internal/modules/mikrotik/v7/rest"
+	"github.com/nimda/router-brute/pkg/duallog"
 	"github.com/rs/zerolog"
 	zlog "github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
@@ -28,13 +29,18 @@ var rootCmd = &cobra.Command{
 	Short: "Router Brute-forcing Tool",
 	Long:  "This tool tests password strength on various router platforms.",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Setup logging
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+		// Setup dual logging: STDOUT=complete log, STDERR=progress+success
+		logLevel := zerolog.InfoLevel
 		if traceMode {
-			zerolog.SetGlobalLevel(zerolog.TraceLevel)
+			logLevel = zerolog.TraceLevel
+		} else if debugMode {
+			logLevel = zerolog.DebugLevel
+		}
+		duallog.Setup(logLevel)
+
+		if traceMode {
 			zlog.Trace().Msg("🔍🔍 TRACE MODE ENABLED")
 		} else if debugMode {
-			zerolog.SetGlobalLevel(zerolog.DebugLevel)
 			zlog.Debug().Msg("🔍 DEBUG MODE ENABLED")
 		}
 

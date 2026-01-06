@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nimda/router-brute/internal/interfaces"
+	"github.com/nimda/router-brute/pkg/duallog"
 	zlog "github.com/rs/zerolog/log"
 )
 
@@ -78,7 +79,8 @@ func (mte *MultiTargetEngine) SetProgressTracker(tracker *ProgressTracker) {
 func (mte *MultiTargetEngine) Start(ctx context.Context) {
 	mte.ctx = ctx
 
-	zlog.Info().
+	// Progress message goes ONLY to STDERR
+	duallog.Progress().
 		Str("protocol", mte.moduleFactory.GetProtocolName()).
 		Int("targets", len(mte.targets)).
 		Int("concurrent_targets", mte.concurrentTargets).
@@ -98,7 +100,8 @@ func (mte *MultiTargetEngine) Start(ctx context.Context) {
 		mte.wg.Wait()
 		close(mte.resultsChan)
 		close(mte.errorsChan)
-		zlog.Info().Msg("Multi-target attack completed")
+		// Progress message goes ONLY to STDERR
+		duallog.Progress().Msg("Multi-target attack completed")
 	}()
 }
 
@@ -117,7 +120,8 @@ func (mte *MultiTargetEngine) processTarget(target *Target, semaphore chan struc
 	defer func() { <-semaphore }()
 
 	startTime := time.Now()
-	zlog.Info().
+	// Progress message goes ONLY to STDERR
+	duallog.Progress().
 		Str("target", target.IP).
 		Str("username", target.Username).
 		Int("port", target.Port).
@@ -172,7 +176,8 @@ func (mte *MultiTargetEngine) processTarget(target *Target, semaphore chan struc
 			}
 			startPasswordIndex = progress.PasswordsTried
 			if startPasswordIndex > 0 {
-				zlog.Info().
+				// Progress message goes ONLY to STDERR
+				duallog.Progress().
 					Str("target", target.IP).
 					Int("port", target.Port).
 					Int("resume_from", startPasswordIndex).
@@ -222,7 +227,8 @@ func (mte *MultiTargetEngine) processTarget(target *Target, semaphore chan struc
 			if result.Success {
 				success = true
 				successPassword = result.Password
-				zlog.Info().
+				// Success message goes to BOTH STDOUT and STDERR
+				duallog.Success().
 					Str("target", target.IP).
 					Str("username", target.Username).
 					Str("password", result.Password).
@@ -298,7 +304,8 @@ func (mte *MultiTargetEngine) processTarget(target *Target, semaphore chan struc
 		EndTime:         endTime,
 	}
 
-	zlog.Info().
+	// Progress message goes ONLY to STDERR
+	duallog.Progress().
 		Str("target", target.IP).
 		Bool("success", success).
 		Int("attempts", len(results)).
