@@ -10,12 +10,15 @@ import (
 
 // progressUpdate represents a progress update message
 type progressUpdate struct {
-	ip             string
-	port           int
-	passwordsTried int
-	completed      bool
-	success        bool
-	foundPassword  string
+	ip                string
+	port              int
+	passwordsTried    int
+	completed         bool
+	success           bool
+	foundPassword     string
+	timeoutMs         int
+	dead              bool
+	consecutiveErrors int
 }
 
 // ProgressTracker tracks attack progress and periodically saves state
@@ -100,6 +103,9 @@ func (pt *ProgressTracker) updateProcessor(ctx context.Context) {
 					update.completed,
 					update.success,
 					update.foundPassword,
+					update.timeoutMs,
+					update.dead,
+					update.consecutiveErrors,
 				)
 				pt.changesDetected = true
 
@@ -191,17 +197,20 @@ func (pt *ProgressTracker) SaveNow() error {
 }
 
 // UpdateTargetProgress updates progress for a target (non-blocking)
-func (pt *ProgressTracker) UpdateTargetProgress(ip string, port int, passwordsTried int, completed bool, success bool, foundPassword string) {
+func (pt *ProgressTracker) UpdateTargetProgress(ip string, port int, passwordsTried int, completed bool, success bool, foundPassword string, timeoutMs int, dead bool, consecutiveErrors int) {
 	// Send update to channel without blocking
 	// Use select with default to make it completely non-blocking
 	select {
 	case pt.updateChan <- progressUpdate{
-		ip:             ip,
-		port:           port,
-		passwordsTried: passwordsTried,
-		completed:      completed,
-		success:        success,
-		foundPassword:  foundPassword,
+		ip:                ip,
+		port:              port,
+		passwordsTried:    passwordsTried,
+		completed:         completed,
+		success:           success,
+		foundPassword:     foundPassword,
+		timeoutMs:         timeoutMs,
+		dead:              dead,
+		consecutiveErrors: consecutiveErrors,
 	}:
 		// Update sent successfully
 	default:

@@ -35,6 +35,9 @@ type MultiTargetEngine struct {
 	passwords         []string
 	workersPerTarget  int
 	rateLimit         time.Duration
+	initialTimeout    time.Duration // Initial timeout for each target
+	maxTimeout        time.Duration // Maximum timeout (adaptive limit)
+	maxConsecErrors   int           // Maximum consecutive errors before marking host dead
 
 	resultsChan     chan MultiTargetResult
 	errorsChan      chan MultiTargetError
@@ -73,6 +76,17 @@ func (mte *MultiTargetEngine) LoadPasswords(passwords []string) {
 // SetProgressTracker sets the progress tracker for resume functionality
 func (mte *MultiTargetEngine) SetProgressTracker(tracker *ProgressTracker) {
 	mte.progressTracker = tracker
+}
+
+// SetTimeouts sets the initial and maximum timeouts
+func (mte *MultiTargetEngine) SetTimeouts(initialTimeout, maxTimeout time.Duration) {
+	mte.initialTimeout = initialTimeout
+	mte.maxTimeout = maxTimeout
+}
+
+// SetMaxConsecutiveErrors sets the maximum consecutive errors threshold
+func (mte *MultiTargetEngine) SetMaxConsecutiveErrors(max int) {
+	mte.maxConsecErrors = max
 }
 
 // Start begins the multi-target attack
@@ -190,6 +204,29 @@ func (mte *MultiTargetEngine) processTarget(target *Target, semaphore chan struc
 	engine := NewEngine(mte.workersPerTarget, mte.rateLimit)
 	engine.SetModule(module)
 
+	// Configure error handling and adaptive timeout
+	if mte.initialTimeout > 0 {
+		engine.SetCurrentTimeout(mte.initialTimeout)
+	}
+	if mte.maxTimeout > 0 {
+		engine.SetMaxTimeout(mte.maxTimeout)
+	}
+	if mte.maxConsecErrors > 0 {
+		engine.SetMaxConsecutiveErrors(mte.maxConsecErrors)
+	}
+
+	// Load timeout from resume state if available
+	if mte.progressTracker != nil {
+		progress := mte.progressTracker.GetTargetProgress(target.IP, target.Port)
+		if progress != nil && progress.TimeoutMs > 0 {
+			engine.SetCurrentTimeout(time.Duration(progress.TimeoutMs) * time.Millisecond)
+			zlog.Debug().
+				Str("target", target.IP).
+				Int("timeout_ms", progress.TimeoutMs).
+				Msg("Loaded timeout from resume state")
+		}
+	}
+
 	// Create a copy of passwords for this target, skipping already-tried ones
 	var passwordsCopy []string
 	if startPasswordIndex > 0 && startPasswordIndex < len(mte.passwords) {
@@ -245,7 +282,10 @@ func (mte *MultiTargetEngine) processTarget(target *Target, semaphore chan struc
 					totalAttempts,
 					false, // not completed yet
 					false, // not successful yet
-					"",
+					"",    // no password found yet
+					int(engine.GetCurrentTimeout().Milliseconds()), // current timeout
+					false,                         // not dead
+					engine.GetConsecutiveErrors(), // consecutive errors
 				)
 			}
 		}
@@ -284,6 +324,11 @@ func (mte *MultiTargetEngine) processTarget(target *Target, semaphore chan struc
 	// Update progress tracker with final status
 	if mte.progressTracker != nil {
 		totalAttempts := startPasswordIndex + len(results)
+		maxErrors := mte.maxConsecErrors
+		if maxErrors == 0 {
+			maxErrors = 5 // Default if not configured
+		}
+		isDead := engine.GetConsecutiveErrors() >= maxErrors
 		mte.progressTracker.UpdateTargetProgress(
 			target.IP,
 			target.Port,
@@ -291,6 +336,9 @@ func (mte *MultiTargetEngine) processTarget(target *Target, semaphore chan struc
 			true, // completed
 			success,
 			successPassword,
+			int(engine.GetCurrentTimeout().Milliseconds()), // final timeout
+			isDead,                        // dead status
+			engine.GetConsecutiveErrors(), // final consecutive errors
 		)
 	}
 

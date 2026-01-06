@@ -25,13 +25,16 @@ type ResumeState struct {
 
 // TargetProgress tracks progress for a single target
 type TargetProgress struct {
-	IP             string `json:"ip"`
-	Port           int    `json:"port"`
-	Username       string `json:"username"`
-	PasswordsTried int    `json:"passwords_tried"`          // Number of passwords attempted
-	Completed      bool   `json:"completed"`                // Target finished (success or all passwords tried)
-	Success        bool   `json:"success"`                  // Found valid credentials
-	FoundPassword  string `json:"found_password,omitempty"` // The successful password (if any)
+	IP                string `json:"ip"`
+	Port              int    `json:"port"`
+	Username          string `json:"username"`
+	PasswordsTried    int    `json:"passwords_tried"`          // Number of passwords attempted
+	Completed         bool   `json:"completed"`                // Target finished (success or all passwords tried)
+	Success           bool   `json:"success"`                  // Found valid credentials
+	FoundPassword     string `json:"found_password,omitempty"` // The successful password (if any)
+	TimeoutMs         int    `json:"timeout_ms,omitempty"`     // Current timeout in milliseconds (adaptive)
+	Dead              bool   `json:"dead,omitempty"`           // Target marked as dead (too many consecutive errors)
+	ConsecutiveErrors int    `json:"consecutive_errors"`       // Count of consecutive errors
 }
 
 // SaveResumeState saves the current attack state to a timestamped file
@@ -110,12 +113,15 @@ func (rs *ResumeState) GetRemainingTargets() []TargetProgress {
 }
 
 // UpdateTargetProgress updates the progress for a specific target
-func (rs *ResumeState) UpdateTargetProgress(ip string, port int, passwordsTried int, completed bool, success bool, foundPassword string) {
+func (rs *ResumeState) UpdateTargetProgress(ip string, port int, passwordsTried int, completed bool, success bool, foundPassword string, timeoutMs int, dead bool, consecutiveErrors int) {
 	for i := range rs.Targets {
 		if rs.Targets[i].IP == ip && rs.Targets[i].Port == port {
 			rs.Targets[i].PasswordsTried = passwordsTried
 			rs.Targets[i].Completed = completed
 			rs.Targets[i].Success = success
+			rs.Targets[i].TimeoutMs = timeoutMs
+			rs.Targets[i].Dead = dead
+			rs.Targets[i].ConsecutiveErrors = consecutiveErrors
 			if success {
 				rs.Targets[i].FoundPassword = foundPassword
 			}

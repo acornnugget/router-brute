@@ -103,7 +103,9 @@ func init() {
 	rootCmd.PersistentFlags().String("wordlist", "", "Path to password wordlist file")
 	rootCmd.PersistentFlags().Int("workers", 5, "Number of concurrent workers")
 	rootCmd.PersistentFlags().String("rate", "100ms", "Rate limit between attempts")
-	rootCmd.PersistentFlags().String("timeout", "10s", "Connection timeout")
+	rootCmd.PersistentFlags().String("timeout", "5s", "Connection timeout")
+	rootCmd.PersistentFlags().String("max-timeout", "15s", "Maximum timeout (adaptive timeout limit)")
+	rootCmd.PersistentFlags().Int("max-conseq-err-per-host", 5, "Maximum consecutive errors before marking host as dead")
 	rootCmd.PersistentFlags().String("target-file", "", "File containing target specifications (multi-target mode)")
 	rootCmd.PersistentFlags().Int("concurrent-targets", 1, "Number of targets to attack simultaneously")
 

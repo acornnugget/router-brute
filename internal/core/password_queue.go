@@ -31,6 +31,17 @@ func (pq *PasswordQueue) Next() string {
 	return password
 }
 
+// Unget returns the last password back to the queue (rewind by 1)
+// Used when a password attempt fails due to connection error and needs to be retried
+func (pq *PasswordQueue) Unget() {
+	pq.mu.Lock()
+	defer pq.mu.Unlock()
+
+	if pq.index > 0 {
+		pq.index--
+	}
+}
+
 // Reset resets the queue to the beginning
 func (pq *PasswordQueue) Reset() {
 	pq.mu.Lock()

@@ -156,14 +156,14 @@ func TestResumeStateUpdateTarget(t *testing.T) {
 	}
 
 	// Update progress
-	state.UpdateTargetProgress("192.168.1.1", 8728, 100, false, false, "")
+	state.UpdateTargetProgress("192.168.1.1", 8728, 100, false, false, "", 10000, false, 0)
 
 	if state.Targets[0].PasswordsTried != 100 {
 		t.Errorf("Passwords tried mismatch: got %d, want 100", state.Targets[0].PasswordsTried)
 	}
 
 	// Mark as completed with success
-	state.UpdateTargetProgress("192.168.1.1", 8728, 150, true, true, "password123")
+	state.UpdateTargetProgress("192.168.1.1", 8728, 150, true, true, "password123", 10000, false, 0)
 
 	if !state.Targets[0].Completed {
 		t.Error("Target should be marked as completed")
@@ -211,7 +211,7 @@ func TestProgressTrackerSaveLoad(t *testing.T) {
 	defer tracker.Stop()
 
 	// Update progress
-	tracker.UpdateTargetProgress("192.168.1.1", 8728, 50, false, false, "")
+	tracker.UpdateTargetProgress("192.168.1.1", 8728, 50, false, false, "", 10000, false, 0)
 
 	// Wait briefly for async update to be processed
 	time.Sleep(50 * time.Millisecond)
